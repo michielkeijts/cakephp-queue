@@ -1,9 +1,9 @@
 {
-	"name": "dereuromark/cakephp-queue",
+	"name": "michielkeijts/cakephp-queue",
 	"type": "cakephp-plugin",
 	"description": "The Queue plugin for CakePHP provides deferred task execution.",
 	"keywords": ["cakephp","queue","deferred tasks","background"],
-	"homepage": "http://github.com/dereuromark/cakephp-queue",
+	"homepage": "http://github.com/michielkeijts/cakephp-queue",
 	"license": "MIT",
 	"authors": [
 		{
@@ -32,7 +32,7 @@
 		"dereuromark/cakephp-ide-helper": "For maximum IDE support, especially around createJob() usage."
 	},
 	"support": {
-		"source": "https://github.com/dereuromark/cakephp-queue"
+		"source": "https://github.com/michielkeijts/cakephp-queue"
 	},
 	"autoload": {
 		"psr-4": {
