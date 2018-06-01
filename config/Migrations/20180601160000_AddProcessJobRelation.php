@@ -23,6 +23,8 @@ class AddProcessJobRelation extends AbstractMigration {
 			'default' => null,
 			'after' => 'priority'
 		]);
+		
+		$table->update();
 	}
 
 }
