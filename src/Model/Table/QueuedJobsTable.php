@@ -79,6 +79,10 @@ class QueuedJobsTable extends Table {
 
 		$this->addBehavior('Timestamp');
 
+		$this->belongsTo('QueueProcesses', [
+            'foreignKey' => 'queue_process_id'
+        ]);
+		
 		$this->initConfig();
 	}
 
