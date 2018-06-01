@@ -12,6 +12,7 @@ use Queue\Model\Entity\QueuedJob;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use RegexIterator;
+use Cake\ORM\Query;
 
 // PHP 7.1+ has this defined
 if (!defined('SIGTERM')) {
@@ -374,6 +375,21 @@ class QueuedJobsTable extends Table {
 		$job = $this->patchEntity($job, $fields);
 
 		return (bool)$this->save($job);
+	}
+
+	/**
+	 * 
+	 * @param Query $query
+	 * @param array $options
+	 * @return Query
+	 */	
+	public function findNotFinished(Query $query, array $options = [] ) :Query
+	{
+		return $query->where([
+			'fetched IS NOT' => NULL,
+			'completed IS' => NULL,
+			'failed <' => 2
+		]);
 	}
 
 	/**
