@@ -80,7 +80,8 @@ class QueuedJobsTable extends Table {
 		$this->addBehavior('Timestamp');
 
 		$this->belongsTo('QueueProcesses', [
-            'foreignKey' => 'queue_process_id'
+            'foreignKey' => 'pid',
+			'bindingKey' => 'pid'
         ]);
 		
 		$this->initConfig();
@@ -232,9 +233,10 @@ class QueuedJobsTable extends Table {
 	 *
 	 * @param array $capabilities Available QueueWorkerTasks.
 	 * @param string|null $group Request a job from this group, (from any group if null)
+	 * @param int|null $pid runner's pid
 	 * @return \Queue\Model\Entity\QueuedJob|null
 	 */
-	public function requestJob(array $capabilities, $group = null) {
+	public function requestJob(array $capabilities, $group = null, int $pid = null) {
 		$now = new Time();
 		$nowStr = $now->toDateTimeString();
 		$driverName = $this->_getDriverName();
@@ -301,7 +303,7 @@ class QueuedJobsTable extends Table {
 			$options['conditions']['OR'][] = $tmp;
 		}
 
-		$job = $this->getConnection()->transactional(function () use ($query, $options, $now) {
+		$job = $this->getConnection()->transactional(function () use ($query, $options, $now, $pid) {
 			$job = $query->find('all', $options)
 				->enableAutoFields(true)
 				->epilog('FOR UPDATE')
@@ -314,7 +316,8 @@ class QueuedJobsTable extends Table {
 			$key = $this->key();
 			$job = $this->patchEntity($job, [
 				'workerkey' => $key,
-				'fetched' => $now
+				'fetched' => $now,
+				'pid' => $pid
 			]);
 
 			return $this->saveOrFail($job);

@@ -17,7 +17,7 @@ class AddProcessJobRelation extends AbstractMigration {
 	public function change() {
 		$table = $this->table('queued_jobs');
 
-		$table->addColumn('queue_process_id', 'integer', [
+		$table->addColumn('pid', 'integer', [
 			'length' => 11,
 			'null' => true,
 			'default' => null,
