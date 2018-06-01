@@ -2,7 +2,7 @@
 
 use Phinx\Migration\AbstractMigration;
 
-class ColumnLength extends AbstractMigration {
+class AddProcessJobRelation extends AbstractMigration {
 
 	/**
 	 * Change Method.
