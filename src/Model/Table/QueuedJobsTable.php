@@ -378,7 +378,9 @@ class QueuedJobsTable extends Table {
 	}
 
 	/**
-	 * 
+	 * Find all jobs which are not finished, but running 
+	 * - fetched, not completed, not failed more than twice, failure_message
+	 * not set. 
 	 * @param Query $query
 	 * @param array $options
 	 * @return Query
@@ -388,7 +390,8 @@ class QueuedJobsTable extends Table {
 		return $query->where([
 			'fetched IS NOT' => NULL,
 			'completed IS' => NULL,
-			'failed <' => 2
+			'failed <' => 2,
+			'failure_message' => NULL
 		]);
 	}
 
@@ -407,6 +410,7 @@ class QueuedJobsTable extends Table {
 			'failed' => 0,
 			'workerkey' => null,
 			'failure_message' => null,
+			'pid' => null
 		];
 		$conditions = [
 			'completed IS' => null,

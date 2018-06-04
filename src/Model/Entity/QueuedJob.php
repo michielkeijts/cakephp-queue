@@ -20,6 +20,7 @@ use Cake\ORM\Entity;
  * @property string $workerkey
  * @property string $status
  * @property int $priority
+ * @property int $pid
  */
 class QueuedJob extends Entity {
 }

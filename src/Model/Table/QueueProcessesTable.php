@@ -48,6 +48,11 @@ class QueueProcessesTable extends Table {
 		$this->setDisplayField('pid');
 		$this->setPrimaryKey('id');
 
+		$this->hasMany('QueuedJobs', [
+            'foreignKey' => 'pid',
+			'bindingKey' => 'pid'
+        ]);
+		
 		$this->addBehavior('Timestamp');
 	}
 
