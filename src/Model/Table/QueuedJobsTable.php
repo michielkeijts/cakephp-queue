@@ -391,7 +391,7 @@ class QueuedJobsTable extends Table {
 			'fetched IS NOT' => NULL,
 			'completed IS' => NULL,
 			'failed <' => 2,
-			'failure_message' => NULL
+			'failure_message IS' => NULL
 		]);
 	}
 
