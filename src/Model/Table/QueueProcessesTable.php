@@ -5,6 +5,7 @@ use Cake\Core\Configure;
 use Cake\I18n\FrozenTime;
 use Cake\ORM\Table;
 use Cake\Validation\Validator;
+use Cake\ORM\Query;
 
 /**
  * QueueProcesses Model
@@ -77,13 +78,34 @@ class QueueProcessesTable extends Table {
 	/**
 	 * @return \Cake\Orm\Query
 	 */
-	public function findActive() {
+	public function findActive():Query
+	{
 		$timeout = Configure::read('Queue.defaultworkertimeout');
 		$thresholdTime = time() - $timeout;
 
 		$query = $this->find()->where(['modified > ' => $thresholdTime]);
 
 		return $query;
+	}
+	
+	/**
+	 * Returns array of all processes which have a valid process running
+	 * @param Query $query a predefined query, for example to search in subset
+	 * of processes
+	 * @return array
+	 */
+	public function getRunning(Query $query = NULL):array
+	{
+		$query = empty($query) ? $this->find() : $query;
+		
+		$runningProcesses = [];
+		foreach ($query as $process) {
+			if ($this->isRunning($process->pid)) {
+				$runningProcesses[] = $process;
+			}
+		}
+		
+		return $runningProcesses;
 	}
 
 	/**
@@ -130,4 +152,17 @@ class QueueProcessesTable extends Table {
 		$this->deleteAll(['modified <' => time() - $thresholdTime]);
 	}
 
+	/**
+	 * check if a Pid is running
+	 * @param int $pid
+	 * @return bool
+	 */
+	public function isRunning(int $pid):bool
+	{
+		if (function_exists('posix_getpgid')) {
+			return posix_getpgid($pid) !== FALSE;
+		}
+		
+		return file_exists($fname);
+	}
 }
