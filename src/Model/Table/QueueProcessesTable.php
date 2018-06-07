@@ -159,10 +159,29 @@ class QueueProcessesTable extends Table {
 	 */
 	public function isRunning(int $pid):bool
 	{
+		$fname = sprintf('/proc/%d', $pid);
 		if (function_exists('posix_getpgid')) {
 			return posix_getpgid($pid) !== FALSE;
 		}
 		
 		return file_exists($fname);
+	}
+	
+	/**
+	 * Kills a process, by sending SIGKILL. If that does not work, try
+	 * unlinking the process file. 
+	 * @param int $pid
+	 * @return bool 
+	 */
+	public function killProcess(int $pid, int $signal = SIGKILL):bool
+	{
+		$fname = sprintf('/proc/%d', $pid);
+		if (posix_kill($pid, $signal))
+			return true;
+		
+		if (file_exists($fname))
+			return unlink($fname);
+		
+		return true;
 	}
 }
