@@ -100,7 +100,7 @@ class QueueProcessesTable extends Table {
 		
 		$runningProcesses = [];
 		foreach ($query as $process) {
-			if ($this->isRunning($process->pid)) {
+			if ($this->isRunning((int)$process->pid)) {
 				$runningProcesses[] = $process;
 			}
 		}
@@ -174,7 +174,7 @@ class QueueProcessesTable extends Table {
 	 * @param int $signal (default SIGKILL)
 	 * @return bool 
 	 */
-	public function killProcess($pid, int $signal = SIGKILL):bool
+	public function killProcess(int $pid, int $signal = 9):bool
 	{
 		$fname = sprintf('/proc/%d', $pid);
 		if (function_exists('posix_kill') && posix_kill($pid, $signal))
