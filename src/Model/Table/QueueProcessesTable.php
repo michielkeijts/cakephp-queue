@@ -171,12 +171,13 @@ class QueueProcessesTable extends Table {
 	 * Kills a process, by sending SIGKILL. If that does not work, try
 	 * unlinking the process file. 
 	 * @param int $pid
+	 * @param int $signal (default SIGKILL)
 	 * @return bool 
 	 */
-	public function killProcess(int $pid, int $signal = SIGKILL):bool
+	public function killProcess($pid, int $signal = SIGKILL):bool
 	{
 		$fname = sprintf('/proc/%d', $pid);
-		if (posix_kill($pid, $signal))
+		if (function_exists('posix_kill') && posix_kill($pid, $signal))
 			return true;
 		
 		if (file_exists($fname))
