@@ -155,7 +155,7 @@ TEXT;
 			}
 			$this->out('[' . date('Y-m-d H:i:s') . '] Looking for Job ...');
 
-			$queuedTask = $this->QueuedJobs->requestJob($this->_getTaskConf(), $group, $pid);
+			$queuedTask = $this->QueuedJobs->requestJob($this->_getTaskConf(), $group, (int)$pid);
 
 			if ($queuedTask) {
 				$this->out('Running Job of type "' . $queuedTask['job_type'] . '"');
