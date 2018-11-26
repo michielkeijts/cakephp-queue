@@ -22,6 +22,7 @@ class ColumnLength extends AbstractMigration {
 			'null' => false,
 			'default' => null,
 		]);
+        $table->update();
 	}
 
 }

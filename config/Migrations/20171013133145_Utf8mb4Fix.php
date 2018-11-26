@@ -76,6 +76,7 @@ class Utf8mb4Fix extends AbstractMigration {
 			'encoding' => 'utf8mb4',
 			'collation' => 'utf8mb4_unicode_ci',
 		]);
+        $table->update();
 	}
 
 }
