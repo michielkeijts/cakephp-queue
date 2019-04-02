@@ -27,7 +27,8 @@ class AlterQueuedJobs extends AbstractMigration {
 					'null' => true,
 					'default' => null,
 				]);
-                $table->update();
+
+				$table->save();
 			}
 		} catch (Exception $e) {
 			Debugger::dump($e->getMessage());

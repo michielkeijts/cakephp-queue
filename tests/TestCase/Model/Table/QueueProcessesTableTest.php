@@ -1,6 +1,8 @@
 <?php
 namespace Queue\Test\TestCase\Model\Table;
 
+use Cake\Core\Configure;
+use Cake\ORM\Exception\PersistenceFailedException;
 use Cake\ORM\TableRegistry;
 use Cake\TestSuite\TestCase;
 use Queue\Model\Table\QueueProcessesTable;
@@ -23,7 +25,7 @@ class QueueProcessesTableTest extends TestCase {
 	 * @var array
 	 */
 	public $fixtures = [
-		'plugin.queue.queue_processes'
+		'plugin.queue.QueueProcesses',
 	];
 
 	/**
@@ -35,6 +37,8 @@ class QueueProcessesTableTest extends TestCase {
 		parent::setUp();
 		$config = TableRegistry::exists('QueueProcesses') ? [] : ['className' => QueueProcessesTable::class];
 		$this->QueueProcesses = TableRegistry::get('QueueProcesses', $config);
+
+		Configure::delete('Queue');
 	}
 
 	/**
@@ -46,6 +50,8 @@ class QueueProcessesTableTest extends TestCase {
 		unset($this->QueueProcesses);
 
 		parent::tearDown();
+
+		Configure::delete('Queue');
 	}
 
 	/**
@@ -53,8 +59,34 @@ class QueueProcessesTableTest extends TestCase {
 	 */
 	public function testAdd() {
 		$pid = '123';
-		$id = $this->QueueProcesses->add($pid);
+		$id = $this->QueueProcesses->add($pid, '456');
 		$this->assertNotEmpty($id);
+
+		$queueProcess = $this->QueueProcesses->get($id);
+		$this->assertSame($pid, $queueProcess->pid);
+
+		$this->assertFalse($queueProcess->terminate);
+		$this->assertNotEmpty($queueProcess->server);
+		$this->assertNotEmpty($queueProcess->workerkey);
+	}
+
+	/**
+	 * @return void
+	 */
+	public function testAddMaxCount() {
+		Configure::write('Queue.maxworkers', 2);
+
+		$pid = '123';
+		$id = $this->QueueProcesses->add($pid, '123123');
+		$this->assertNotEmpty($id);
+
+		$pid = '234';
+		$id = $this->QueueProcesses->add($pid, '234234');
+		$this->assertNotEmpty($id);
+
+		$this->expectException(PersistenceFailedException::class);
+		$pid = '345';
+		$this->QueueProcesses->add($pid, '345345');
 	}
 
 	/**
@@ -62,10 +94,13 @@ class QueueProcessesTableTest extends TestCase {
 	 */
 	public function testUpdate() {
 		$pid = '123';
-		$id = $this->QueueProcesses->add($pid);
+		$id = $this->QueueProcesses->add($pid, '456');
 		$this->assertNotEmpty($id);
 
 		$this->QueueProcesses->update($pid);
+
+		$queueProcess = $this->QueueProcesses->get($id);
+		$this->assertFalse($queueProcess->terminate);
 	}
 
 	/**
@@ -73,14 +108,12 @@ class QueueProcessesTableTest extends TestCase {
 	 */
 	public function testRemove() {
 		$pid = '123';
-		$queueProcess = $this->QueueProcesses->newEntity([
-			'pid' => $pid
-		]);
-		$this->QueueProcesses->saveOrFail($queueProcess);
+		$queueProcessId = $this->QueueProcesses->add($pid, '456');
+		$this->assertNotEmpty($queueProcessId);
 
 		$this->QueueProcesses->remove($pid);
 
-		$result = $this->QueueProcesses->find()->where(['id' => $queueProcess->id])->first();
+		$result = $this->QueueProcesses->find()->where(['id' => $queueProcessId])->first();
 		$this->assertNull($result);
 	}
 

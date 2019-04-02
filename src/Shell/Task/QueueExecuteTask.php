@@ -42,19 +42,17 @@ class QueueExecuteTask extends QueueTask {
 			$this->out('Call like this:');
 			$this->out('	cake queue add execute *command* *param1* *param2* ...');
 			$this->out(' ');
-		} else {
 
-			$data = [
-				'command' => $this->args[1],
-				'params' => array_slice($this->args, 2),
-			];
-			if ($this->QueuedJobs->createJob('Execute', $data)) {
-				$this->out('Job created');
-			} else {
-				$this->err('Could not create Job');
-			}
-
+			return;
 		}
+
+		$data = [
+			'command' => $this->args[1],
+			'params' => array_slice($this->args, 2),
+		];
+
+		$this->QueuedJobs->createJob('Execute', $data);
+		$this->success('OK, job created, now run the worker');
 	}
 
 	/**
@@ -67,16 +65,48 @@ class QueueExecuteTask extends QueueTask {
 	 * @return bool Success
 	 */
 	public function run(array $data, $jobId) {
-		$command = escapeshellcmd($data['command']);
-		if (!empty($data['params'])) {
-			$command .= ' ' . implode(' ', $data['params']);
+		$data += [
+			'command' => null,
+			'params' => [],
+			'redirect' => true,
+			'escape' => true,
+			'accepted' => [static::CODE_SUCCESS],
+		];
+		$command = $data['command'];
+
+		if ($data['escape']) {
+			$command = escapeshellcmd($command);
 		}
 
-		$this->out('Executing: ' . $command);
-		exec($command, $output, $status);
-		$this->out(' ');
+		if ($data['params']) {
+			$params = $data['params'];
+			if ($data['escape']) {
+				foreach ($params as $key => $value) {
+					$params[$key] = escapeshellcmd($value);
+				}
+			}
+			$command .= ' ' . implode(' ', $params);
+		}
+
+		$this->out('Executing: `' . $command . '`');
+
+		if ($data['redirect']) {
+			$command .= ' 2>&1';
+		}
+
+		exec($command, $output, $returnCode);
+		$this->nl();
 		$this->out($output);
-		return !$status;
+
+		$acceptedReturnCodes = $data['accepted'];
+		$success = !$acceptedReturnCodes || in_array($returnCode, $acceptedReturnCodes, true);
+		if (!$success) {
+			$this->err('Error (code ' . $returnCode . ')', static::VERBOSE);
+		} else {
+			$this->success('Success (code ' . $returnCode . ')', static::VERBOSE);
+		}
+
+		return $success;
 	}
 
 }

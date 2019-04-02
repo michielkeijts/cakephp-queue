@@ -2,11 +2,13 @@
 /**
  * This file configures default behavior for all workers
  *
- * To modify these parameters, copy this file into your own CakePHP APP/Config directory.
+ * To modify these parameters, copy this file into your own CakePHP config directory or copy the array into your existing file.
  */
 
 return [
 	'Queue' => [
+		/* Required config keys */
+
 		// seconds to sleep() when no executable job is found
 		'sleeptime' => 10,
 
@@ -23,10 +25,21 @@ return [
 		'workermaxruntime' => 120,
 
 		// minimum time (in seconds) which a task remains in the database before being cleaned up.
-		'cleanuptimeout' => 3600,
+		'cleanuptimeout' => 2592000, // 30 days
+
+		/* Optional config keys */
+
+		// set to true for multi server setup, this will affect web backend possibilities to kill/end workers
+		'multiserver' => false,
+
+		// set this to a limit that can work with your memory limits and alike, 0 => no limit
+		'maxworkers' => 3,
 
 		// instruct a Workerprocess quit when there are no more tasks for it to execute (true = exit, false = keep running)
 		'exitwhennothingtodo' => false,
+
+		// seconds of running time after which the PHP process will terminate, null uses workermaxruntime * 100
+		'workertimeout' => null,
 
 		// false for DB, or deprecated string pid file path directory (by default goes to the app/tmp/queue folder)
 		'pidfilepath' => false, // Deprecated: TMP . 'queue' . DS,
@@ -39,5 +52,11 @@ return [
 
 		// set default datasource connection
 		'connection' => null,
+
+		// enable Search. requires friendsofcake/search
+		'isSearchEnabled' => true,
+
+		// enable Search. requires frontend assets
+		'isStatisticEnabled' => false,
 	],
 ];

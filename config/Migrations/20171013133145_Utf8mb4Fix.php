@@ -25,19 +25,12 @@ class Utf8mb4Fix extends AbstractMigration {
 			'encoding' => 'ascii',
 			'collation' => 'ascii_general_ci',
 		]);
-        $table->update();
+		$table->update();
 
 		$table = $this->table('queued_jobs');
 		$table->changeColumn('job_type', 'string', [
 			'length' => 45,
 			'null' => false,
-			'default' => null,
-			'encoding' => 'utf8mb4',
-			'collation' => 'utf8mb4_unicode_ci',
-		]);
-		$table->changeColumn('data', 'text', [
-			'limit' => MysqlAdapter::TEXT_MEDIUM,
-			'null' => true,
 			'default' => null,
 			'encoding' => 'utf8mb4',
 			'collation' => 'utf8mb4_unicode_ci',
@@ -51,13 +44,6 @@ class Utf8mb4Fix extends AbstractMigration {
 		]);
 		$table->changeColumn('reference', 'string', [
 			'length' => 255,
-			'null' => true,
-			'default' => null,
-			'encoding' => 'utf8mb4',
-			'collation' => 'utf8mb4_unicode_ci',
-		]);
-		$table->changeColumn('failure_message', 'text', [
-			'limit' => MysqlAdapter::TEXT_MEDIUM,
 			'null' => true,
 			'default' => null,
 			'encoding' => 'utf8mb4',
@@ -77,7 +63,29 @@ class Utf8mb4Fix extends AbstractMigration {
 			'encoding' => 'utf8mb4',
 			'collation' => 'utf8mb4_unicode_ci',
 		]);
-        $table->update();
+		$table->update();
+
+		//TODO: check adapter and skip for postgres, instead of try/catch
+		try {
+			$table = $this->table('queued_jobs');
+			$table->changeColumn('data', 'text', [
+				'limit' => MysqlAdapter::TEXT_MEDIUM,
+				'null' => true,
+				'default' => null,
+				'encoding' => 'utf8mb4',
+				'collation' => 'utf8mb4_unicode_ci',
+			]);
+			$table->changeColumn('failure_message', 'text', [
+				'limit' => MysqlAdapter::TEXT_MEDIUM,
+				'null' => true,
+				'default' => null,
+				'encoding' => 'utf8mb4',
+				'collation' => 'utf8mb4_unicode_ci',
+			]);
+			$table->update();
+		} catch (Exception $e) {
+			Debugger::dump($e->getMessage());
+		}
 	}
 
 }
