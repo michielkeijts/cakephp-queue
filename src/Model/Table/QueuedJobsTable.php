@@ -16,7 +16,6 @@ use Queue\Model\Entity\QueuedJob;
 use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use RegexIterator;
-use Cake\ORM\Query;
 use RuntimeException;
 
 // PHP 7.1+ has this defined
