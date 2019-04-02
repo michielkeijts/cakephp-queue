@@ -5,12 +5,17 @@ namespace Queue\Shell;
 use Cake\Console\Shell;
 use Cake\Core\Configure;
 use Cake\Datasource\Exception\RecordNotFoundException;
+use Cake\I18n\FrozenTime;
 use Cake\I18n\Number;
-use Cake\I18n\Time;
 use Cake\Log\Log;
+use Cake\ORM\Exception\PersistenceFailedException;
 use Cake\Utility\Inflector;
+use Cake\Utility\Text;
 use Exception;
+use Queue\Model\Entity\QueuedJob;
+use Queue\Model\ProcessEndingException;
 use Queue\Queue\TaskFinder;
+use Throwable;
 
 declare(ticks = 1);
 
@@ -36,9 +41,19 @@ class QueueShell extends Shell {
 	protected $_taskConf;
 
 	/**
+	 * @var int
+	 */
+	protected $_time = 0;
+
+	/**
 	 * @var bool
 	 */
 	protected $_exit = false;
+
+	/**
+	 * @var string|null
+	 */
+	protected $_pid;
 
 	/**
 	 * Overwrite shell initialize to dynamically load all Queue Related Tasks.
@@ -53,6 +68,17 @@ class QueueShell extends Shell {
 
 		$this->QueuedJobs->initConfig();
 		$this->loadModel('Queue.QueueProcesses');
+	}
+
+	/**
+	 * @return void
+	 */
+	public function startup() {
+		if ($this->param('quiet')) {
+			$this->interactive = false;
+		}
+
+		parent::startup();
 	}
 
 	/**
@@ -120,91 +146,77 @@ TEXT;
 	 * Runs a Queue Worker process which will try to find unassigned jobs in the queue
 	 * which it may run and try to fetch and execute them.
 	 *
-	 * @return void
+	 * @return int|null
 	 */
 	public function runworker() {
-		$pid = $this->_initPid();
+		try {
+			$pid = $this->_initPid();
+		} catch (PersistenceFailedException $exception) {
+			$this->err($exception->getMessage());
+			$limit = (int)Configure::read('Queue.maxworkers');
+			if ($limit) {
+				$this->out('Cannot start worker: Too many workers already/still running on this server (' . $limit . '/' . $limit . ')');
+			}
+			return static::CODE_ERROR;
+		}
+
 		// Enable Garbage Collector (PHP >= 5.3)
 		if (function_exists('gc_enable')) {
 			gc_enable();
 		}
 		if (function_exists('pcntl_signal')) {
 			pcntl_signal(SIGTERM, [&$this, '_exit']);
+			pcntl_signal(SIGINT, [&$this, '_abort']);
+			pcntl_signal(SIGTSTP, [&$this, '_abort']);
+			pcntl_signal(SIGQUIT, [&$this, '_abort']);
 		}
 		$this->_exit = false;
 
-		$starttime = time();
-		$group = null;
-		if (!empty($this->params['group'])) {
-			$group = $this->params['group'];
-		}
+		$startTime = time();
+		$groups = $this->_stringToArray($this->param('group'));
+		$types = $this->_stringToArray($this->param('type'));
+
 		while (!$this->_exit) {
-			// make sure accidental overriding isnt possible
-			set_time_limit(0);
+			$this->_setPhpTimeout();
 
 			try {
 				$this->_updatePid($pid);
 			} catch (RecordNotFoundException $exception) {
-				// Manually killed, e.g. during deploy update
+				// Manually killed
+				$this->_exit = true;
+				continue;
+			} catch (ProcessEndingException $exception) {
+				// Soft killed, e.g. during deploy update
 				$this->_exit = true;
 				continue;
 			}
 
 			if ($this->param('verbose')) {
-				$this->_log('runworker', $pid);
+				$this->_log('runworker', $pid, false);
 			}
 			$this->out('[' . date('Y-m-d H:i:s') . '] Looking for Job ...');
 
-			$queuedTask = $this->QueuedJobs->requestJob($this->_getTaskConf(), $group);
+			$queuedJob = $this->QueuedJobs->requestJob($this->_getTaskConf(), $groups, $types);
 
-			if ($queuedTask) {
-				$this->out('Running Job of type "' . $queuedTask['job_type'] . '"');
-				$this->_log('job ' . $queuedTask['job_type'] . ', id ' . $queuedTask['id'], $pid);
-				$taskname = 'Queue' . $queuedTask['job_type'];
-
-				try {
-					$data = unserialize($queuedTask['data']);
-					/** @var \Queue\Shell\Task\QueueTask $task */
-					$task = $this->{$taskname};
-					$return = $task->run((array)$data, $queuedTask['id']);
-
-					$failureMessage = null;
-					if ($task->failureMessage) {
-						$failureMessage = $task->failureMessage;
-					}
-				} catch (Exception $e) {
-					$return = false;
-
-					$failureMessage = get_class($e) . ': ' . $e->getMessage();
-					//log the exception
-					$this->_logError($taskname . "\n" . $failureMessage . "\n" . $e->getTraceAsString());
-				}
-
-				if ($return) {
-					$this->QueuedJobs->markJobDone($queuedTask);
-					$this->out('Job Finished.');
-				} else {
-					$this->QueuedJobs->markJobFailed($queuedTask, $failureMessage);
-					$failedStatus = $this->QueuedJobs->getFailedStatus($queuedTask, $this->_getTaskConf());
-					$this->_log('job ' . $queuedTask['job_type'] . ', id ' . $queuedTask['id'] . ' failed and ' . $failedStatus, $pid);
-					$this->out('Job did not finish, ' . $failedStatus . ' after try ' . $queuedTask->failed . '.');
-				}
+			if ($queuedJob) {
+				$this->runJob($queuedJob, $pid);
 			} elseif (Configure::read('Queue.exitwhennothingtodo')) {
 				$this->out('nothing to do, exiting.');
 				$this->_exit = true;
 			} else {
 				$this->out('nothing to do, sleeping.');
-				sleep(Configure::read('Queue.sleeptime'));
+				sleep(Configure::readOrFail('Queue.sleeptime'));
 			}
 
 			// check if we are over the maximum runtime and end processing if so.
-			if (Configure::read('Queue.workermaxruntime') && (time() - $starttime) >= Configure::read('Queue.workermaxruntime')) {
+			if (Configure::readOrFail('Queue.workermaxruntime') && (time() - $startTime) >= Configure::readOrFail('Queue.workermaxruntime')) {
 				$this->_exit = true;
-				$this->out('Reached runtime of ' . (time() - $starttime) . ' Seconds (Max ' . Configure::read('Queue.workermaxruntime') . '), terminating.');
+				$this->out('Reached runtime of ' . (time() - $startTime) . ' Seconds (Max ' . Configure::readOrFail('Queue.workermaxruntime') . '), terminating.');
 			}
-			if ($this->_exit || rand(0, 100) > (100 - Configure::read('Queue.gcprob'))) {
+			if ($this->_exit || mt_rand(0, 100) > (100 - (int)Configure::readOrFail('Queue.gcprob'))) {
 				$this->out('Performing Old job cleanup.');
 				$this->QueuedJobs->cleanOldJobs();
+				$this->QueueProcesses->cleanEndedProcesses();
 			}
 			$this->hr();
 		}
@@ -217,11 +229,48 @@ TEXT;
 	}
 
 	/**
-	 * @param string $message
+	 * @param \Queue\Model\Entity\QueuedJob $queuedJob
+	 * @param string $pid
 	 * @return void
 	 */
-	protected function _logError($message) {
-		Log::write('error', $message);
+	protected function runJob(QueuedJob $queuedJob, $pid) {
+		$this->out('Running Job of type "' . $queuedJob->job_type . '"');
+		$this->_log('job ' . $queuedJob->job_type . ', id ' . $queuedJob->id, $pid, false);
+		$taskName = 'Queue' . $queuedJob->job_type;
+
+		try {
+			$this->_time = time();
+
+			$data = unserialize($queuedJob->data);
+			/** @var \Queue\Shell\Task\QueueTask $task */
+			$task = $this->{$taskName};
+			$return = $task->run((array)$data, $queuedJob->id);
+
+			$failureMessage = null;
+			if ($task->failureMessage) {
+				$failureMessage = $task->failureMessage;
+			}
+		} catch (Throwable $e) {
+			$return = false;
+
+			$failureMessage = get_class($e) . ': ' . $e->getMessage();
+			$this->_logError($taskName . "\n" . $failureMessage . "\n" . $e->getTraceAsString(), $pid);
+		} catch (Exception $e) {
+			$return = false;
+
+			$failureMessage = get_class($e) . ': ' . $e->getMessage();
+			$this->_logError($taskName . "\n" . $failureMessage . "\n" . $e->getTraceAsString(), $pid);
+		}
+
+		if ($return) {
+			$this->QueuedJobs->markJobDone($queuedJob);
+			$this->out('Job Finished.');
+		} else {
+			$this->QueuedJobs->markJobFailed($queuedJob, $failureMessage);
+			$failedStatus = $this->QueuedJobs->getFailedStatus($queuedJob, $this->_getTaskConf());
+			$this->_log('job ' . $queuedJob->job_type . ', id ' . $queuedJob->id . ' failed and ' . $failedStatus, $pid);
+			$this->out('Job did not finish, ' . $failedStatus . ' after try ' . $queuedJob->failed . '.');
+		}
 	}
 
 	/**
@@ -234,9 +283,51 @@ TEXT;
 			$this->abort('You disabled cleanuptimout in config. Aborting.');
 		}
 
-		$this->out('Deleting old jobs, that have finished before ' . date('Y-m-d H:i:s', time() - Configure::read('Queue.cleanuptimeout')));
+		$this->out('Deleting old jobs, that have finished before ' . date('Y-m-d H:i:s', time() - (int)Configure::read('Queue.cleanuptimeout')));
 		$this->QueuedJobs->cleanOldJobs();
-		$this->QueueProcesses->cleanKilledProcesses();
+		$this->QueueProcesses->cleanEndedProcesses();
+	}
+
+	/**
+	 * Gracefully end running workers when deploying.
+	 *
+	 * Use $in
+	 * - all: to end all workers on all servers
+	 * - server: to end the ones on this server
+	 *
+	 * @param string|null $in
+	 * @return void
+	 */
+	public function end($in = null) {
+		$processes = $this->QueuedJobs->getProcesses($in === 'server');
+		if (!$processes) {
+			$this->out('No processes found');
+
+			return;
+		}
+
+		$this->out(count($processes) . ' processes:');
+		foreach ($processes as $process => $timestamp) {
+			$this->out(' - ' . $process . ' (last run @ ' . (new FrozenTime($timestamp)) . ')');
+		}
+
+		$options = array_keys($processes);
+		$options[] = 'all';
+		if ($in === null) {
+			$in = $this->in('Process', $options, 'all');
+		}
+
+		if ($in === 'all' || $in === 'server') {
+			foreach ($processes as $process => $timestamp) {
+				$this->QueuedJobs->endProcess($process);
+			}
+
+			$this->out('All ' . count($processes) . ' processes ended.');
+
+			return;
+		}
+
+		$this->QueuedJobs->endProcess($in);
 	}
 
 	/**
@@ -245,19 +336,23 @@ TEXT;
 	public function kill() {
 		$processes = $this->QueuedJobs->getProcesses();
 		if (!$processes) {
-			$this->out('No processed found');
+			$this->out('No processes found');
 
 			return;
 		}
 
 		$this->out(count($processes) . ' processes:');
 		foreach ($processes as $process => $timestamp) {
-			$this->out(' - ' . $process . ' (last run @ ' . (new Time($timestamp)) . ')');
+			$this->out(' - ' . $process . ' (last run @ ' . (new FrozenTime($timestamp)) . ')');
+		}
+
+		if (Configure::read('Queue.multiserver')) {
+			$this->abort('Cannot kill by PID in multiserver environment.');
 		}
 
 		$options = array_keys($processes);
 		$options[] = 'all';
-		$in = $this->in('Process', $options);
+		$in = $this->in('Process', $options, 'all');
 
 		if ($in === 'all') {
 			foreach ($processes as $process => $timestamp) {
@@ -278,7 +373,29 @@ TEXT;
 	 */
 	public function reset() {
 		$this->out('Resetting...');
-		$this->QueuedJobs->reset();
+
+		$count = $this->QueuedJobs->reset();
+
+		$this->success($count . ' jobs reset.');
+	}
+
+	/**
+	 * Manually reset already successfully run jobs for re-run.
+	 * Careful, this should not be done with non-idempotent jobs.
+	 *
+	 * This is mainly useful for debugging and local development,
+	 * if you have to run sth again.
+	 *
+	 * @param string $type
+	 * @param string|null $reference
+	 * @return void
+	 */
+	public function rerun($type, $reference = null) {
+		$this->out('Rerunning...');
+
+		$count = $this->QueuedJobs->rerun($type, $reference);
+
+		$this->success($count . ' jobs reset for re-run.');
 	}
 
 	/**
@@ -298,6 +415,12 @@ TEXT;
 			}
 			$this->out('* ' . $key . ': ' . print_r($val, true));
 		}
+
+		$this->out();
+
+		$status = $this->QueueProcesses->status();
+		$this->out('Current running workers: ' . ($status ? $status['workers'] : '-'));
+		$this->out('Last run: ' . ($status ? $status['time']->nice() : '-'));
 	}
 
 	/**
@@ -306,16 +429,18 @@ TEXT;
 	 * @return void
 	 */
 	public function stats() {
-		$this->out('Jobs currenty in the Queue:');
+		$this->out('Jobs currently in the queue:');
 
 		$types = $this->QueuedJobs->getTypes()->toArray();
 		foreach ($types as $type) {
 			$this->out('      ' . str_pad($type, 20, ' ', STR_PAD_RIGHT) . ': ' . $this->QueuedJobs->getLength($type));
 		}
 		$this->hr();
-		$this->out('Total unfinished Jobs      : ' . $this->QueuedJobs->getLength());
+		$this->out('Total unfinished jobs: ' . $this->QueuedJobs->getLength());
+		$this->out('Running workers (processes): ' . $this->QueueProcesses->findActive()->count());
+		$this->out('Server name: ' . $this->QueueProcesses->buildServerString());
 		$this->hr();
-		$this->out('Finished Job Statistics:');
+		$this->out('Finished job statistics:');
 		$data = $this->QueuedJobs->getStats();
 		foreach ($data as $item) {
 			$this->out(' ' . $item['job_type'] . ': ');
@@ -339,26 +464,6 @@ TEXT;
 	}
 
 	/**
-	 * Set up tables
-	 *
-	 * @see README
-	 * @return void
-	 */
-	public function install() {
-		$this->out('Run `bin/cake migrations migrate -p Queue`');
-		$this->out('Set up cronjob, e.g. via `crontab -e -u www-data`');
-	}
-
-	/**
-	 * Remove table and kill workers
-	 *
-	 * @return void
-	 */
-	public function uninstall() {
-		$this->out('Remove all workers and cronjobs and then delete the Queue plugin tables.');
-	}
-
-	/**
 	 * Get option parser method to parse commandline options
 	 *
 	 * @return \Cake\Console\ConsoleOptionParser
@@ -378,26 +483,35 @@ TEXT;
 		$subcommandParserFull = $subcommandParser;
 		$subcommandParserFull['options']['group'] = [
 			'short' => 'g',
-			'help' => 'Group',
-			'default' => '',
+			'help' => 'Group (comma separated list possible)',
+			'default' => null,
+		];
+		$subcommandParserFull['options']['type'] = [
+			'short' => 't',
+			'help' => 'Type (comma separated list possible)',
+			'default' => null,
+		];
+
+		$rerunParser = $subcommandParser;
+		$rerunParser['arguments'] = [
+			'type' => [
+				'help' => 'Job type. You need to specify one.',
+				'required' => true,
+			],
+			'reference' => [
+				'help' => 'Reference.',
+				'required' => false,
+			],
 		];
 
 		return parent::getOptionParser()
-			->description($this->_getDescription())
+			->setDescription($this->_getDescription())
 			->addSubcommand('clean', [
 				'help' => 'Remove old jobs (cleanup)',
 				'parser' => $subcommandParser,
 			])
 			->addSubcommand('add', [
 				'help' => 'Add Job',
-				'parser' => $subcommandParser,
-			])
-			->addSubcommand('install', [
-				'help' => 'Install info',
-				'parser' => $subcommandParser,
-			])
-			->addSubcommand('uninstall', [
-				'help' => 'Uninstall info',
 				'parser' => $subcommandParser,
 			])
 			->addSubcommand('stats', [
@@ -412,8 +526,16 @@ TEXT;
 				'help' => 'Manually reset (failed) jobs for re-run.',
 				'parser' => $subcommandParserFull,
 			])
+			->addSubcommand('rerun', [
+				'help' => 'Manually rerun (successfully) run job.',
+				'parser' => $rerunParser,
+			])
 			->addSubcommand('hard_reset', [
 				'help' => 'Hard reset queue (remove all jobs)',
+				'parser' => $subcommandParserFull,
+			])
+			->addSubcommand('end', [
+				'help' => 'Manually end a worker.',
 				'parser' => $subcommandParserFull,
 			])
 			->addSubcommand('kill', [
@@ -429,17 +551,47 @@ TEXT;
 	/**
 	 * Timestamped log.
 	 *
-	 * @param string $type Log type
+	 * @param string $message Log type
 	 * @param int|null $pid PID of the process
+	 * @param bool $addDetails
 	 * @return void
 	 */
-	protected function _log($type, $pid = null) {
+	protected function _log($message, $pid = null, $addDetails = true) {
 		if (!Configure::read('Queue.log')) {
 			return;
 		}
 
-		$message = $type . ' (pid ' . $pid . ')';
+		if ($addDetails) {
+			$timeNeeded = $this->_timeNeeded();
+			$memoryUsage = $this->_memoryUsage();
+			$message .= ' [' . $timeNeeded . ', ' . $memoryUsage . ']';
+		}
+
+		if ($pid) {
+			$message .= ' (pid ' . $pid . ')';
+		}
 		Log::write('info', $message, ['scope' => 'queue']);
+	}
+
+	/**
+	 * @param string $message
+	 * @param int|null $pid PID of the process
+	 * @return void
+	 */
+	protected function _logError($message, $pid = null) {
+		$timeNeeded = $this->_timeNeeded();
+		$memoryUsage = $this->_memoryUsage();
+		$message .= ' [' . $timeNeeded . ', ' . $memoryUsage . ']';
+
+		if ($pid) {
+			$message .= ' (pid ' . $pid . ')';
+		}
+		$serverString = $this->QueueProcesses->buildServerString();
+		if ($serverString) {
+			$message .= ' {' . $serverString . '}';
+		}
+
+		Log::write('error', $message);
 	}
 
 	/**
@@ -458,12 +610,12 @@ TEXT;
 				if (property_exists($this->{$taskName}, 'timeout')) {
 					$this->_taskConf[$taskName]['timeout'] = $this->{$taskName}->timeout;
 				} else {
-					$this->_taskConf[$taskName]['timeout'] = Configure::read('Queue.defaultworkertimeout');
+					$this->_taskConf[$taskName]['timeout'] = Configure::readOrFail('Queue.defaultworkertimeout');
 				}
 				if (property_exists($this->{$taskName}, 'retries')) {
 					$this->_taskConf[$taskName]['retries'] = $this->{$taskName}->retries;
 				} else {
-					$this->_taskConf[$taskName]['retries'] = Configure::read('Queue.defaultworkerretries');
+					$this->_taskConf[$taskName]['retries'] = Configure::readOrFail('Queue.defaultworkerretries');
 				}
 				if (property_exists($this->{$taskName}, 'rate')) {
 					$this->_taskConf[$taskName]['rate'] = $this->{$taskName}->rate;
@@ -476,11 +628,22 @@ TEXT;
 	/**
 	 * Signal handling to queue worker for clean shutdown
 	 *
-	 * @param int $signal not used
+	 * @param int $signal
 	 * @return void
 	 */
 	protected function _exit($signal) {
 		$this->_exit = true;
+	}
+
+	/**
+	 * Signal handling for Ctrl+C
+	 *
+	 * @param int $signal
+	 * @return void
+	 */
+	protected function _abort($signal) {
+		$this->_deletePid($this->_pid);
+		exit(1);
 	}
 
 	/**
@@ -500,12 +663,15 @@ TEXT;
 		$pidFilePath = Configure::read('Queue.pidfilepath');
 		if (!$pidFilePath) {
 			$pid = $this->_retrievePid();
-			$this->QueueProcesses->add($pid);
+			$key = $this->QueuedJobs->key();
+			$this->QueueProcesses->add($pid, $key);
+
+			$this->_pid = $pid;
 
 			return $pid;
 		}
 
-		// Deprecated
+		// Deprecated: Will be removed, use DB here
 		if (!file_exists($pidFilePath)) {
 			mkdir($pidFilePath, 0755, true);
 		}
@@ -519,6 +685,8 @@ TEXT;
 		$fp = fopen($pidFilePath . $pidFileName, 'w');
 		fwrite($fp, $pid);
 		fclose($fp);
+
+		$this->_pid = $pid;
 
 		return $pid;
 	}
@@ -548,7 +716,7 @@ TEXT;
 			return;
 		}
 
-		// Deprecated
+		// Deprecated: Will be removed, use DB here
 		$pidFileName = 'queue_' . $pid . '.pid';
 		if (!empty($pidFilePath)) {
 			touch($pidFilePath . 'queue.pid');
@@ -559,21 +727,93 @@ TEXT;
 	}
 
 	/**
-	 * @param string $pid
+	 * @return string Memory usage in MB.
+	 */
+	protected function _memoryUsage() {
+		$limit = ini_get('memory_limit');
+
+		$used = number_format(memory_get_peak_usage(true) / (1024 * 1024), 0) . 'MB';
+		if ($limit !== '-1') {
+			$used .= '/' . $limit;
+		}
+
+		return $used;
+	}
+
+	/**
+	 * @param string|null $pid
 	 *
 	 * @return void
 	 */
 	protected function _deletePid($pid) {
+		if (!$pid) {
+			$pid = $this->_pid;
+		}
+		if (!$pid) {
+			return;
+		}
+
 		$pidFilePath = Configure::read('Queue.pidfilepath');
 		if (!$pidFilePath) {
 			$this->QueueProcesses->remove($pid);
 			return;
 		}
 
-		// Deprecated
+		// Deprecated: Will be removed, use DB here
 		if (file_exists($pidFilePath . 'queue_' . $pid . '.pid')) {
 			unlink($pidFilePath . 'queue_' . $pid . '.pid');
 		}
+	}
+
+	/**
+	 * @return string
+	 */
+	protected function _timeNeeded() {
+		$diff = $this->_time() - $this->_time($this->_time);
+		$seconds = max($diff, 1);
+
+		return $seconds . 's';
+	}
+
+	/**
+	 * @param int|null $providedTime
+	 *
+	 * @return int
+	 */
+	protected function _time($providedTime = null) {
+		if ($providedTime) {
+			return $providedTime;
+		}
+
+		return time();
+	}
+
+	/**
+	 * @param string|null $param
+	 * @return array
+	 */
+	protected function _stringToArray($param) {
+		if (!$param) {
+			return [];
+		}
+
+		$array = Text::tokenize($param);
+
+		return array_filter($array);
+	}
+
+	/**
+	 * Makes sure accidental overriding isn't possible, uses workermaxruntime times 100 by default.
+	 *
+	 * @return void
+	 */
+	protected function _setPhpTimeout() {
+		$timeLimit = (int)Configure::readOrFail('Queue.workermaxruntime') * 100;
+		if (Configure::read('Queue.workertimeout') !== null) {
+			$timeLimit = (int)Configure::read('Queue.workertimeout');
+		}
+
+		set_time_limit($timeLimit);
 	}
 
 }

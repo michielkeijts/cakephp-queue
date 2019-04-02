@@ -1,15 +1,16 @@
 <?php
 /**
  * @var \App\View\AppView $this
+ * @var array $pendingDetails
  */
 use Cake\Core\Configure;
 ?>
-
 
 <nav class="col-md-3 col-xs-12 large-3 medium-4 columns" id="actions-sidebar">
 	<ul class="side-nav list-unstyled">
 		<li><?php echo $this->Form->postLink(__d('queue', 'Reset {0}', __d('queue', 'Queued Jobs')), ['action' => 'reset'], ['confirm' => __d('queue', 'Sure? This will make all failed jobs ready for re-run.'), 'class' => 'btn margin btn-default']); ?></li>
 		<li><?php echo $this->Form->postLink(__d('queue', 'Hard Reset {0}', __d('queue', 'Queued Jobs')), ['action' => 'hardReset'], ['confirm' => __d('queue', 'Sure? This will delete all jobs and completely reset the queue.'), 'class' => 'btn margin btn-warning']); ?></li>
+		<li><?php echo $this->Html->link(__d('queue', 'List {0}', __d('queue', 'Queued Jobs')), ['controller' => 'QueuedJobs', 'action' => 'index'], ['class' => 'btn margin btn-primary']); ?></li>
 	</ul>
 </nav>
 
@@ -22,26 +23,33 @@ use Cake\Core\Configure;
 		<h2><?php echo __d('queue', 'Status'); ?></h2>
 		<?php if ($status) { ?>
 			<?php
-			$running = (time() - $status['time']) < MINUTE;
+			/** @var \Cake\I18n\FrozenTime $time */
+			$time = $status['time'];
+			$running = $time->addMinute()->isFuture();
 			?>
 			<?php echo $this->Format->yesNo($running); ?> <?php echo $running ? __d('queue', 'Running') : __d('queue', 'Not running'); ?> (<?php echo __d('queue', 'last {0}', $this->Time->relLengthOfTime($status['time']))?>)
 
 			<?php
 			echo '<div><small>Currently ' . $this->Html->link($status['workers'] . ' worker(s)', ['action' => 'processes']) . ' total.</small></div>';
 			?>
+			<?php
+			echo '<div><small>' . count($servers) . ' CLI server(s): ' . implode(', ', $servers) .'</small></div>';
+			?>
+
 		<?php } else { ?>
 			n/a
 		<?php } ?>
 
 		<h2><?php echo __d('queue', 'Queued Jobs'); ?></h2>
+		<p>
 		<?php
-		echo $current;
-		?> task(s) await processing
-
+		echo $new . '/' .$current;
+		?> task(s) newly await processing.
+		</p>
 		<ol>
 			<?php
 			foreach ($pendingDetails as $item) {
-				echo '<li>' . $item['job_type'] . ' (' . $item['reference'] . '):';
+				echo '<li>' . $this->Html->link($item['job_type'], ['controller' => 'QueuedJobs', 'action' => 'view', $item['id']]) . ' (ref <code>' . h($item['reference'] ?: '-') . '</code>, prio ' . $item['priority'] . '):';
 				echo '<ul>';
 
 				$reset = '';
@@ -52,12 +60,27 @@ use Cake\Core\Configure;
 					$reset .= ' ' . $this->Form->postLink('Remove', ['action' => 'removeJob', $item['id']], ['confirm' => 'Sure?']);
 				}
 
-				echo '<li>Created: ' . $this->Time->nice($item['created']) . '</li>';
-				echo '<li>Fetched: ' . $this->Time->nice($item['fetched']) . '</li>';
-				echo '<li>Status: ' . $item['status'] . '</li>';
-				echo '<li>Progress: ' . $this->Number->toPercentage($item['progress'] * 100, 0) . '</li>';
-				echo '<li>Failures: ' . $item['failed'] . $reset . '</li>';
-				echo '<li>Failure Message: ' . h($item['failure_message']) . '</li>';
+				$notBefore = '';
+				if ($item['notbefore']) {
+					$notBefore = ' (scheduled ' . $this->Time->nice($item['notbefore']) . ')';
+				}
+
+				echo '<li>Created: ' . $this->Time->nice($item['created']) . $notBefore . '</li>';
+
+
+				if ($item['fetched']) {
+					echo '<li>Fetched: ' . $this->Time->nice($item['fetched']) . '</li>';
+
+					$status = '';
+					if ($item['status']) {
+						$status = ' (status: ' . h($item['status']) . ')';
+					}
+
+					echo '<li>Progress: ' . $this->Number->toPercentage($item['progress'] * 100, 0) . $status . '</li>';
+					echo '<li>Failures: ' . $item['failed'] . $reset . '</li>';
+					echo '<li>Failure Message: ' . $this->Text->truncate($item['failure_message'], 200) . '</li>';
+				}
+
 				echo '</ul>';
 				echo '</li>';
 			}
@@ -68,7 +91,7 @@ use Cake\Core\Configure;
 		<ul>
 			<?php
 			foreach ($data as $item) {
-				echo '<li>' . $item['job_type'] . ':';
+				echo '<li>' . h($item['job_type']) . ':';
 				echo '<ul>';
 				echo '<li>Finished Jobs in Database: ' . $item['num'] . '</li>';
 				echo '<li>Average Job existence: ' . $item['alltime'] . 's</li>';
@@ -83,7 +106,9 @@ use Cake\Core\Configure;
 			?>
 		</ul>
 
-
+		<?php if (Configure::read('Queue.isStatisticEnabled')) { ?>
+		<p><?php echo $this->Html->link(__d('queue', 'Detailed Statistics'), ['controller' => 'QueuedJobs', 'action' => 'stats']); ?></p>
+		<?php } ?>
 	</div>
 
 	<div class="col-md-6 col-xs-12 medium-6 columns">
@@ -122,7 +147,7 @@ use Cake\Core\Configure;
 				if (substr($task, 0, 11) !== 'Queue.Queue') {
 					continue;
 				}
-				if ($task === 'Queue.QueueExecute') {
+				if (substr($task, -7) !== 'Example') {
 					continue;
 				}
 
@@ -131,8 +156,9 @@ use Cake\Core\Configure;
 				echo '</li>';
 			}
 			?>
-
 		</ul>
+
+		<p><?php echo $this->Html->link(__d('queue', 'Trigger Delayed Test/Demo Job'), ['controller' => 'QueuedJobs', 'action' => 'test']); ?></p>
 
 	</div>
 </div>

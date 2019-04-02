@@ -46,11 +46,8 @@ class QueueProgressExampleTask extends QueueTask {
 		$data = [
 			'duration' => 2 * MINUTE
 		];
-		if ($this->QueuedJobs->createJob('ProgressExample', $data)) {
-			$this->out('OK, job created, now run the worker');
-		} else {
-			$this->err('Could not create Job');
-		}
+		$this->QueuedJobs->createJob('ProgressExample', $data);
+		$this->success('OK, job created, now run the worker');
 	}
 
 	/**
@@ -72,14 +69,12 @@ class QueueProgressExampleTask extends QueueTask {
 		$this->out('A total of ' . $seconds . ' seconds need to pass...');
 		for ($i = 0; $i < $seconds; $i++) {
 			sleep(1);
-			$this->QueuedJobs->updateProgress($jobId, ($i + 1) / $seconds);
+			$this->QueuedJobs->updateProgress($jobId, ($i + 1) / $seconds, 'Status Test ' . ($i + 1) . 's');
 		}
-		$this->QueuedJobs->updateProgress($jobId, 1);
+		$this->QueuedJobs->updateProgress($jobId, 1, 'Status Test Done');
 
 		$this->hr();
-		$this->out(' ->Success, the ProgressExample Job was run.<-');
-		$this->out(' ');
-		$this->out(' ');
+		$this->success(' -> Success, the ProgressExample Job was run. <-');
 		return true;
 	}
 

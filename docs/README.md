@@ -17,7 +17,7 @@ Plugin::load('Queue', ['routes' => true]);
 
 Run the following command in the CakePHP console to create the tables using the Migrations plugin:
 ```sh
-bin/cake Migrations migrate -p Queue
+bin/cake migrations migrate -p Queue
 ```
 
 It is also advised to have the `posix` PHP extension enabled. 
@@ -44,7 +44,7 @@ You may create a file called `app_queue.php` inside your `config` folder (NOT th
 - Default timeout after which a job is requeued if the worker doesn't report back:
 
     ```php
-    $config['Queue']['defaultworkertimeout'] = 3600;
+    $config['Queue']['defaultworkertimeout'] = 1800;
     ```
 
 - Default number of retries if a job fails or times out:
@@ -56,10 +56,18 @@ You may create a file called `app_queue.php` inside your `config` folder (NOT th
 - Seconds of running time after which the worker will terminate (0 = unlimited):
 
     ```php
-    $config['Queue']['workermaxruntime'] = 60;
+    $config['Queue']['workermaxruntime'] = 120;
     ```
 
     *Warning:* Do not use 0 if you are using a cronjob to permanantly start a new worker once in a while and if you do not exit on idle.
+    
+- Seconds of running time after which the PHP script of the worker will terminate (0 = unlimited):
+
+    ```php
+    $config['Queue']['workertimeout'] = 120 * 100;
+    ```
+
+    *Warning:* Do not use 0 if you are using a cronjob to permanantly start a new worker once in a while and if you do not exit on idle. This is the last defense of the tool to prevent flooding too many processes. So make sure this is long enough to never cut off jobs, but also not too long, so the process count stays in manageable range.
 
 - Should a Workerprocess quit when there are no more tasks for it to execute (true = exit, false = keep running):
 
@@ -72,6 +80,14 @@ You may create a file called `app_queue.php` inside your `config` folder (NOT th
     ```php
     $config['Queue']['cleanuptimeout'] = 2592000; // 30 days
     ```
+
+- Multi-server setup:
+
+    ```php
+    $config['Queue']['multiserver'] = true // Defaults to false (single server)
+    ```
+    
+    For multiple servers running either CLI/web separately, or even multiple CLI workers on top, make sure to enable this.
 
 - Use a different connection:
 
@@ -100,26 +116,40 @@ Finally, make sure you allow the configured `pidfilepath` to be creatable and wr
 Especially on deployment some `mkdir` command might be necessary.
 Set it to false to use the DB here instead, as well.
 
+#### Backend configuration
+
+- isSearchEnabled: Set to false if you do not want search/filtering capability.
+This is auto-detected based on [Search](https://github.com/FriendsOfCake/search) plugin being available/loaded if not disabled.
+
+- isStatsEnabled: Set to true to enable. This requires [chart.js](https://github.com/chartjs/Chart.js) asset to be available.
+You can also overwrite the template and as such change the asset library as well as the output/chart.
+
+
+#### Configuration tips
+
+For the beginning maybe use not too many runners in parallel, and keep the runtimes rather short while starting new jobs every few minutes.
+You can then always increase spawning of runners if there is a shortage. 
+
 ### Task configuration
 
 You can set two main things on each task as property: timeout and retries.
 ```php
-	/**
-	 * Timeout for this task in seconds, after which the task is reassigned to a new worker.
-	 *
-	 * @var int
-	 */
-	public $timeout = 120;
-	
-	/**
-	 * Number of times a failed instance of this task should be restarted before giving up.
-	 *
-	 * @var int
-	 */
-	public $retries = 1;
+    /**
+     * Timeout for this task in seconds, after which the task is reassigned to a new worker.
+     *
+     * @var int
+     */
+    public $timeout = 120;
+    
+    /**
+     * Number of times a failed instance of this task should be restarted before giving up.
+     *
+     * @var int
+     */
+    public $retries = 1;
 ```
 Make sure you set the timeout high enough so that it could never run longer than this, otherwise you risk it being re-run while still being run.
-I recommend setting it to at least 2x the maximum possible execution length.
+It is recommended setting it to at least 2x the maximum possible execution length. See "Concurrent workers" below.
 
 Set the retries to at least 1, otherwise it will never execute again after failure in the first run.
 
@@ -136,30 +166,30 @@ namespace App\Shell\Task;
 
 class QueueYourNameForItTask extends QueueTask {
 
-	/**
-	 * @var int
-	 */
-	public $timeout = 20;
+    /**
+     * @var int
+     */
+    public $timeout = 20;
 
-	/**
-	 * @var int
-	 */
-	public $retries = 1;
+    /**
+     * @var int
+     */
+    public $retries = 1;
 
-	/**
-	 * @param array $data The array passed to QueuedJobsTable::createJob()
-	 * @param int $jobId The id of the QueuedJob entity
-	 * @return bool Success
-	 */
-	public function run(array $data, $jobId) {
-		$this->loadModel('FooBars');
-		if (!$this->FooBars->doSth()) {
-			throw new RuntimeException('Couldnt do sth.');
-		}
+    /**
+     * @param array $data The array passed to QueuedJobsTable::createJob()
+     * @param int $jobId The id of the QueuedJob entity
+     * @return bool Success
+     */
+    public function run(array $data, $jobId) {
+        $this->loadModel('FooBars');
+        if (!$this->FooBars->doSth()) {
+            throw new RuntimeException('Couldnt do sth.');
+        }
 
-		return true;
-	}
-	
+        return true;
+    }
+    
 }
 ```
 Make sure it returns a boolean result (true ideally), or otherwise throws an exception with a clear error message.
@@ -185,8 +215,8 @@ Run the following using the CakePHP shell:
     The worker will always try to find jobs matching its installed Tasks.
 
 
-Some tasks will not be triggered from the console, but from the APP code.
-You will need to use the model access for QueueTask and the createJob() function to do this.
+Most tasks will not be triggered from the console, but from the APP code.
+You will need to use the model access for QueuedJobs and the createJob() function to do this.
 
 The `createJob()` function takes three arguments.
 - The first argument is the name of the type of job that you are creating.
@@ -209,6 +239,18 @@ It will use your custom APP `QueueEmailTask` to send out emails via CLI.
 
 Important: Do not forget to set your [domain](https://book.cakephp.org/3.0/en/core-libraries/email.html#sending-emails-from-cli) when sending from CLI.
 
+
+### Running only specific tasks per worker
+You can filter "running" by group or even type:
+```
+bin/cake queue runworker -g MyGroup
+bin/cake queue runworker -t MyType,AnotherType,-ThisOneToo
+bin/cake queue runworker -t "-ThisOneNot"
+```
+Use `-` prefix to exclude. Note that you might need to use `""` around the value then to avoid it being seen as option key.
+
+That can be helpful when migrating servers and you only want to execute certain ones on the new system or want to test specific servers.
+
 ### Avoiding parallel (re)queueing
 
 For some background-tasks you will want to make sure only a single instance of this type is currently run. 
@@ -217,12 +259,11 @@ In your logic you can check on this using `isQueued()` and a unique reference:
     /**
      * @return \Cake\Http\Response|null
      */
-    public function triggerImport()
-    {
+    public function triggerImport() {
         $this->request->allowMethod('post');
 
         $this->loadModel('Queue.QueuedJobs');
-        if ($this->QueuedJobs->isQueued('my-import')) {
+        if ($this->QueuedJobs->isQueued('my-import', 'Execute')) {
             $this->Flash->error('Job already running');
 
             return $this->redirect($this->referer(['action' => 'index']));
@@ -246,7 +287,9 @@ So if someone clicks on the button again before the job is finished, he will not
 
 For more complex use cases, you can manually use `->find()->where()`, of course.
 
-### Updating status
+Note that the 2nd argument (job type) is optional, but recommended. If you do not use it, make sure your reference is globally unique.
+
+### Updating progress/status
 
 The `createJob()` method returns the entity. So you can store the ID and at any time ask the queue about the status of this job.
 
@@ -262,13 +305,64 @@ foreach ($records as $i => $record) {
     $this->processImageRendering($record);
     $this->QueuedJobs->updateProgress($id, ($i + 1) / $totalRecords);
 }
-
-// Get progress status in web site
-$job = $this->QueuedJobs->get($id);
-$progress = $job->progress; // A float from 0 to 1
-echo number_format($progress * 100, 0) . '%'; // Outputs 87% for example
 ```
 
+You can, independently from the progress field, also use a status (string) field to give feedback.
+See this example implementation:
+
+```php
+class FooTask extends QueueTask {
+
+    public function run(array $data, $jobId) {
+        // Initializing
+        $jobsTable = TableRegistry::getTableLocator()->get('Queue.QueuedJobs');
+        $foo = new Foo();
+
+        // Part one
+        $jobsTable->updateAll(
+            ['status' => 'Doing the first thing'],
+            ['id' => $jobId]
+        );
+        $foo->doFirstPartOfTask();
+        $jobsTable->updateProgress($jobId, 33);
+
+        // Part two
+        $jobsTable->updateAll(
+            ['status' => 'Doing the next thing'],
+            ['id' => $jobId]
+        );
+        $foo->doNextPartOfTask();
+        $jobsTable->updateProgress($jobId, 66);
+
+        // Part three
+        $jobsTable->updateAll(
+            ['status' => 'Doing the last thing'],
+            ['id' => $jobId]
+        );
+        $foo->doLastPartOfTask();
+        $jobsTable->updateProgress($jobId, 100);
+
+        // Done
+        $jobsTable->updateAll(
+            ['status' => 'Done doing things'],
+            ['id' => $jobId]
+        );
+        
+        return true;
+    }
+}
+```
+
+Get progress status in web site and display:
+```php
+$job = $this->QueuedJobs->get($id);
+
+$progress = $job->progress; // A float from 0 to 1
+echo number_format($progress * 100, 0) . '%'; // Outputs 87% for example
+
+$status = $job->status; // A string, make sure to escape
+echo h($status); // Outputs "Doing the last thing" for example
+```
 
 ### Logging
 
@@ -276,19 +370,40 @@ By default errors are always logged, and with log enabled also the execution of 
 Make sure you add this to your config:
 ```php
 'Log' => [
-	...
-	'queue' => [
-		'className' => ...,
-		'type' => 'queue',
-		'levels' => ['info'],
-		'scopes' => ['queue'],
-	],
+    ...
+    'queue' => [
+        'className' => ...,
+        'type' => 'queue',
+        'levels' => ['info'],
+        'scopes' => ['queue'],
+    ],
 ],
 ```
 
 When debugging (using -v) on the runworker, it will also log the worker run and end.
 
 You can disable info logging by setting `Queue.log` to `false` in your config.
+
+### Resetting
+You can reset all failed jobs from CLI and web backend.
+With web backend you can reset specific ones, as well.
+
+From CLI you run this to reset all at once:
+```
+bin/cake queue reset
+```
+
+### Rerunning
+You can rerun successfully run jobs if they are not yet cleaned out. Make sure your cleanup timeout is high enough here.
+Usually weeks or months is a good balance to have those still stored for this case.
+
+This is especially useful for local development or debugging, though. As you would otherwise have to manually trigger or import the job all the time.
+
+From CLI you run this to rerun all of a specific job type at once:
+```
+bin/cake queue rerun FooBar
+```
+You can add an additional reference to rerun a specific job.
 
 
 ### Notes
@@ -329,7 +444,7 @@ Play around with it, but just don't shoot over the top.
 The plugin works completely without it, by just using the CLI shell commands.
 But if you want to browse the statistics via URL, you can enable the routing for it (see above) and then access `/admin/queue`
 to see how status of your queue, statistics and settings.
-Please note that this requires the Tools plugin to be loaded if you do not customize the view templates on project level.
+Please note that this requires the [Tools plugin](https://github.com/dereuromark/cakephp-tools) to be loaded if you do not customize the view templates on project level.
 Also make sure you loaded the helpers needed (Tools.Format, Tools.Time as Time, etc).
 
 By default the templates should work fine in both Foundation (v5+) and Boostrap (v3+).
@@ -391,6 +506,47 @@ This way each time you will `$email->send()` it will use `QueueTransport` as mai
 is useful when dealing with emails which serialization would overflow database `data` field length.
 
 
+### Using built in Email task
+
+The quickest and easiest way is to use the built in Email task:
+```php
+$data = [
+    'settings' => [
+        'to' => $user->email,
+        'from' => Configure::read('Config.adminEmail'),
+        'subject' => $subject,
+    ],
+    'content' => $content,
+];
+$queuedJobsTable = TableRegistry::get('Queue.QueuedJobs');
+$queuedJobsTable->createJob('Email', $data);
+```
+
+This will sent a plain email. Each settings key must have a matching setter method on the Email class.
+
+If you want a templated email, you need to pass view vars instead of content:
+```php
+$data = [
+    'settings' => [
+        'to' => $user->email,
+        'from' => Configure::read('Config.adminEmail'),
+        'subject' => $subject,
+    ],
+    'vars' => [
+        'myEntity' => $myEntity,
+        ...    
+    ],
+];
+ ```
+ 
+You can also assemble an Email object manually and pass that along as settings directly:
+```php
+$data = [
+    'settings' => $emailObject,
+    'content' => $content,
+];
+```
+
 ### Manually assembling your emails
 
 This is the most advised way to generate your asynchronous emails.
@@ -402,7 +558,7 @@ Inside your CommentsTable class after saving the data you execute this hook:
 
 ```php
 /**
- * @param Comment $comment
+ * @param \App\Model\Entity\Comment $comment
  * @return void
  */
 protected function _notifyAdmin(Comment $comment)
@@ -444,20 +600,84 @@ Make sure you got the template for it then, e.g.:
 <?= $this->Url->build(['prefix' => 'admin', 'controller' => 'Comments', 'action'=> 'view', $comment['id']], true) ?>
 ```
 
-This way all the generation is in the specific task and template and can be tested separaretly.
+This way all the generation is in the specific task and template and can be tested separately.
+
+### Using built in Execute task
+The built in task directly runs on the same path as your app, so you can use relative paths or absolute ones:
+```php
+$data = [
+    'command' => 'bin/cake importer run',
+    'content' => $content,
+];
+$queuedJobsTable = TableRegistry::get('Queue.QueuedJobs');
+$queuedJobsTable->createJob('Execute', $data);
+```
+
+The task automatically captures stderr output into stdout. If you don't want this, set "redirect" to false.
+It also escapes by default using "escape" true. Only disable this if you trust the source.
+
+By default it only allows return code `0` (success) to pass. If you need different accepted return codes, pass them as "accepted" array.
+If you want to disable this check and allow any return code to be successful, pass `[]` (empty array).
+
+*Warning*: This can essentially execute anything on CLI. Make sure you never expose this directly as free-text input to anyone.
+Use only predefined and safe code-snippets here!
+
+### Multi Server Setup
+When working with multiple CLI servers there are several requirements for it to work smoothly:
+
+File approach does not work here, you must use the new DB approach (using queue_processes table).
+
+Make sure `env('SERVER_NAME')` or `gethostname()` return a unique name per server instance.
+This is required as PID alone is now not unique anymore.
+Each worker then registers itself as combination of `PID + server name`.
+
+You can not kill workers on a different server, you can only mark them as "to be terminated".
+The next run the worker registers this and auto-terminates early.
+
+Removing PIDs from DB will yield the same result then, a "soft-killing".
+
+### Ending workers
+The "soft-killing" should be preferred over "hard-killing".
+It will make sure the worker process will finish the current job and then abort right afterwards.
+
+This is useful when deploying a code or DB migration change and you want the "old workers" based on the old code
+to not process any new incoming jobs after deployment.
+
+In this case, make sure one of your first calls of the deployment script is
+```
+bin/cake queue end -q
+```
+
+To avoid further deployment issues, also try to keep the runtime per worker to only a few minutes.
+You can additionally do this call at the end of the deployment script to make sure any workers started in the meantime
+will also be aborting early.
+
+#### Ending workers per server
+A useful feature when having multiple servers and workers, and deploying separately, is to only end the workers on the server you are deploying to.
+
+For this make sure you have either `env('SERVER_NAME')` or `gethostname()` return a unique name per server instance (see above). 
+These are stored in the processes and as such you can then end them per instance that deploys.
+
+This snippet should be in the deploy script then instead.
+```
+bin/cake queue end server -q
+```
+
+You can check/verify the current server name using `bin/cake queue stats`.
+
+If you want to test locally, type `export SERVER_NAME=myserver1` and then run the above.
 
 
 ### Killing workers
 
-First of all: Make sure you don't run workers with `workermaxruntime` of `0`.
+First of all: Make sure you don't run workers with `workermaxruntime` and `workertimeout` of `0`.
 Then they would at least not run forever, and might pile up only if you start them faster then they terminate.
-
+That can overload the server.
 
 #### Via tool
 
 You can kill workers from the backend or the command line.
 Make sure you have set up the workers with the same user (www-data usually) as the user that tries to kill them, or it will not work.
-
 
 #### Manually
 
@@ -472,14 +692,19 @@ Then you can kill them gracefully with `-15` (or forcefully with `-9`, not recom
 Locally, if you want to kill them all, usually `killapp -15 php` does the trick.
 Do not run this with production ones, though.
 
+The console kill commands are also registered here. So if you run a worker locally, 
+and you enter `Ctrl+C` or alike, it will also hard-kill this worker process.
+
+### Configure loading
+
+Use Configure `'Queue.configLoaded'` set to `true` to avoid the deprecated loading of the config inside the model layer.
+This part is deprecated and can cause troubles.
 
 ### Known Limitations
 
-
 #### Concurrent workers may execute the same job multiple times
 
-
-If you want to use multiple workers, please use only one per type or double check that all jobs have a high enough timeout (>> 2x max possible execution time of a job). Currently it would otherwise risk the jobs being run multiple times!
+If you want to use multiple workers, please double check that all jobs have a high enough timeout (>> 2x max possible execution time of a job). Currently it would otherwise risk the jobs being run multiple times!
 
 
 ## IDE support
@@ -512,4 +737,5 @@ I am looking forward to your contributions.
 
 There are a few guidelines that I need contributors to follow:
 * Coding standards (`composer cs-check` to check and `composer cs-fix` to fix)
+* PHPStan (`composer phpstan`, might need `composer phpstan-setup` first)
 * Passing tests (`php phpunit.phar`)

@@ -49,11 +49,8 @@ class QueueSuperExampleTask extends QueueTask {
 		/*
 		 * Adding a task of type 'example' with no additionally passed data
 		 */
-		if ($this->QueuedJobs->createJob('SuperExample', null)) {
-			$this->out('OK, job created, now run the worker');
-		} else {
-			$this->err('Could not create Job');
-		}
+		$this->QueuedJobs->createJob('SuperExample');
+		$this->success('OK, job created, now run the worker');
 	}
 
 	/**
@@ -69,9 +66,7 @@ class QueueSuperExampleTask extends QueueTask {
 		$this->hr();
 		$this->out('CakePHP Queue SuperExample task.');
 		$this->hr();
-		$this->out(' ->Success, the SuperExample Job was run.<-');
-		$this->out(' ');
-		$this->out(' ');
+		$this->success(' -> Success, the SuperExample Job was run. <-');
 
 		// Lets create an Example task on successful execution
 		$this->QueuedJobs->createJob('Example');

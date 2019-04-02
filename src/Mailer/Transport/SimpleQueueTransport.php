@@ -23,31 +23,32 @@ class SimpleQueueTransport extends AbstractTransport {
 	public function send(Email $email) {
 		if (!empty($this->_config['queue'])) {
 			$this->_config = $this->_config['queue'] + $this->_config;
-			$email->config((array)$this->_config['queue'] + ['queue' => []]);
+			$email->setConfig((array)$this->_config['queue'] + ['queue' => []]);
 			unset($this->_config['queue']);
 		}
 
 		$settings = [
-			'from' => [$email->from()],
-			'to' => [$email->to()],
-			'cc' => [$email->cc()],
-			'bcc' => [$email->bcc()],
-			'charset' => [$email->charset()],
-			'replyTo' => [$email->replyTo()],
-			'readReceipt' => [$email->readReceipt()],
-			'returnPath' => [$email->returnPath()],
-			'messageId' => [$email->messageId()],
-			'domain' => [$email->domain()],
-			'getHeaders' => [$email->getHeaders()],
-			'headerCharset' => [$email->headerCharset()],
-			'theme' => [$email->theme()],
-			'profile' => [$email->profile()],
-			'emailFormat' => [$email->emailFormat()],
-			'subject' => method_exists($email, 'getOriginalSubject') ? [$email->getOriginalSubject()] : [$email->subject()],
+			'from' => [$email->getFrom()],
+			'to' => [$email->getTo()],
+			'cc' => [$email->getCc()],
+			'bcc' => [$email->getBcc()],
+			'charset' => [$email->getCharset()],
+			'replyTo' => [$email->getReplyTo()],
+			'readReceipt' => [$email->getReadReceipt()],
+			'returnPath' => [$email->getReturnPath()],
+			'messageId' => [$email->getMessageId()],
+			'domain' => [$email->getDomain()],
+			'headers' => [$email->getHeaders()],
+			'headerCharset' => [$email->getHeaderCharset()],
+			'theme' => [$email->getTheme()],
+			'profile' => [$email->getProfile()],
+			'emailFormat' => [$email->getEmailFormat()],
+			'subject' => method_exists($email, 'getOriginalSubject') ? [$email->getOriginalSubject()] : [$email->getSubject()],
 			'transport' => [$this->_config['transport']],
-			'attachments' => [$email->attachments()],
-			'template' => $email->template(), //template() gives 2 values - template and layout
-			'viewVars' => [$email->viewVars()]
+			'attachments' => [$email->getAttachments()],
+			'template' => [$email->getTemplate()],
+			'layout' => [$email->getLayout()],
+			'viewVars' => [$email->getViewVars()]
 		];
 
 		foreach ($settings as $setting => $value) {
@@ -60,14 +61,18 @@ class SimpleQueueTransport extends AbstractTransport {
 		$result = $QueuedJobs->createJob('Email', ['settings' => $settings]);
 		$result['headers'] = '';
 		$result['message'] = '';
-		return $result;
+
+		return $result->toArray();
 	}
 
 	/**
 	 * @return \Queue\Model\Table\QueuedJobsTable
 	 */
 	protected function getQueuedJobsModel() {
-		return TableRegistry::get('Queue.QueuedJobs');
+		/** @var \Queue\Model\Table\QueuedJobsTable $table */
+		$table = TableRegistry::get('Queue.QueuedJobs');
+
+		return $table;
 	}
 
 }

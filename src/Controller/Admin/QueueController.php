@@ -4,8 +4,7 @@ namespace Queue\Controller\Admin;
 
 use App\Controller\AppController;
 use Cake\Core\Configure;
-use Cake\Event\Event;
-use Cake\Network\Exception\NotFoundException;
+use Cake\Http\Exception\NotFoundException;
 use Queue\Queue\TaskFinder;
 
 /**
@@ -20,15 +19,12 @@ class QueueController extends AppController {
 	public $modelClass = 'Queue.QueuedJobs';
 
 	/**
-	 * QueueController::beforeFilter()
-	 *
-	 * @param \Cake\Event\Event $event
-	 * @return \Cake\Http\Response|null
+	 * @return void
 	 */
-	public function beforeFilter(Event $event) {
-		$this->QueuedJobs->initConfig();
+	public function initialize() {
+		parent::initialize();
 
-		parent::beforeFilter($event);
+		$this->QueuedJobs->initConfig();
 	}
 
 	/**
@@ -38,25 +34,40 @@ class QueueController extends AppController {
 	 * @return \Cake\Http\Response|null
 	 */
 	public function index() {
-		$status = $this->_status();
+		$this->loadModel('Queue.QueueProcesses');
+		$status = $this->QueueProcesses->status();
 
 		$current = $this->QueuedJobs->getLength();
 		$pendingDetails = $this->QueuedJobs->getPendingStats();
+		$new = 0;
+		foreach ($pendingDetails as $pendingDetail) {
+			if ($pendingDetail['fetched'] || $pendingDetail['failed']) {
+				continue;
+			}
+			$new++;
+		}
+
 		$data = $this->QueuedJobs->getStats();
 
 		$taskFinder = new TaskFinder();
 		$tasks = $taskFinder->allAppAndPluginTasks();
 
-		$this->set(compact('current', 'data', 'pendingDetails', 'status', 'tasks'));
+		$servers = $this->QueueProcesses->find()->distinct(['server'])->find('list', ['keyField' => 'server', 'valueField' => 'server'])->toArray();
+		$this->set(compact('new', 'current', 'data', 'pendingDetails', 'status', 'tasks', 'servers'));
 		$this->helpers[] = 'Tools.Format';
+		$this->helpers[] = 'Tools.Time';
+		$this->helpers[] = 'Tools.Text';
 	}
 
 	/**
 	 * @param string|null $job
 	 *
 	 * @return \Cake\Http\Response
+	 *
+	 * @throws \Cake\Http\Exception\NotFoundException
 	 */
 	public function addJob($job = null) {
+		$this->request->allowMethod('post');
 		if (!$job) {
 			throw new NotFoundException();
 		}
@@ -72,8 +83,11 @@ class QueueController extends AppController {
 	 * @param string|null $id
 	 *
 	 * @return \Cake\Http\Response
+	 *
+	 * @throws \Cake\Http\Exception\NotFoundException
 	 */
 	public function resetJob($id = null) {
+		$this->request->allowMethod('post');
 		if (!$id) {
 			throw new NotFoundException();
 		}
@@ -91,6 +105,7 @@ class QueueController extends AppController {
 	 * @return \Cake\Http\Response
 	 */
 	public function removeJob($id = null) {
+		$this->request->allowMethod('post');
 		$queuedJob = $this->QueuedJobs->get($id);
 
 		$this->QueuedJobs->delete($queuedJob);
@@ -106,21 +121,35 @@ class QueueController extends AppController {
 	public function processes() {
 		$processes = $this->QueuedJobs->getProcesses();
 
-		if ($this->request->is('post') && $this->request->query('kill')) {
-			$pid = $this->request->query('kill');
+		if ($this->request->is('post') && $this->request->getQuery('end')) {
+			$pid = $this->request->getQuery('end');
+			$this->QueuedJobs->endProcess($pid);
+
+			return $this->redirect(['action' => 'processes']);
+		}
+		if ($this->request->is('post') && $this->request->getQuery('kill')) {
+			$pid = (int)$this->request->getQuery('kill');
 			$this->QueuedJobs->terminateProcess($pid);
 
 			return $this->redirect(['action' => 'processes']);
 		}
 
+		$pidFilePath = Configure::read('Queue.pidfilepath');
+		if (!$pidFilePath) {
+			$this->loadModel('Queue.QueueProcesses');
+			$terminated = $this->QueueProcesses->find()->where(['terminate' => true])->all()->toArray();
+			$this->set(compact('terminated'));
+		}
+
 		$this->set(compact('processes'));
+		$this->helpers[] = 'Shim.Configure';
 	}
 
 	/**
 	 * Mark all failed jobs as ready for re-run.
 	 *
 	 * @return \Cake\Http\Response
-	 * @throws \Cake\Network\Exception\MethodNotAllowedException when not posted
+	 * @throws \Cake\Http\Exception\MethodNotAllowedException when not posted
 	 */
 	public function reset() {
 		$this->request->allowMethod('post');
@@ -136,7 +165,7 @@ class QueueController extends AppController {
 	 * Truncate the queue list / table.
 	 *
 	 * @return \Cake\Http\Response
-	 * @throws \Cake\Network\Exception\MethodNotAllowedException when not posted
+	 * @throws \Cake\Http\Exception\MethodNotAllowedException when not posted
 	 */
 	public function hardReset() {
 		$this->request->allowMethod('post');
@@ -146,59 +175,6 @@ class QueueController extends AppController {
 		$this->Flash->success($message);
 
 		return $this->redirect(['action' => 'index']);
-	}
-
-	/**
-	 * QueueController::_status()
-	 *
-	 * If pid loggin is enabled, will return an array with
-	 * - time: int Timestamp
-	 * - workers: int Count of currently running workers
-	 *
-	 * @return array Status array
-	 */
-	protected function _status() {
-		$timeout = Configure::read('Queue.defaultworkertimeout');
-		$thresholdTime = time() - $timeout;
-
-		$pidFilePath = Configure::read('Queue.pidfilepath');
-		if (!$pidFilePath) {
-			$this->loadModel('Queue.QueueProcesses');
-			$results = $this->QueueProcesses->find()->where(['modified >' => $thresholdTime])->orderDesc('modified')->hydrate(false)->all()->toArray();
-
-			if (!$results) {
-				return [];
-			}
-
-			$count = count($results);
-			$record = array_shift($results);
-			/** @var \Cake\I18n\FrozenTime $time */
-			$time = $record['modified'];
-
-			return [
-				'time' => (int)$time->toUnixString(),
-				'workers' => $count,
-			];
-		}
-
-		$file = $pidFilePath . 'queue.pid';
-		if (!file_exists($file)) {
-			return [];
-		}
-
-		$count = 0;
-		foreach (glob($pidFilePath . 'queue_*.pid') as $filename) {
-			$time = filemtime($filename);
-			if ($time >= $thresholdTime) {
-				$count++;
-			}
-		}
-
-		$res = [
-			'time' => filemtime($file),
-			'workers' => $count,
-		];
-		return $res;
 	}
 
 }
