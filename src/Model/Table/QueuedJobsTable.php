@@ -17,6 +17,7 @@ use RecursiveDirectoryIterator;
 use RecursiveIteratorIterator;
 use RegexIterator;
 use RuntimeException;
+use Cake\I18n\Time;
 
 // PHP 7.1+ has this defined
 if (!defined('SIGTERM')) {
@@ -381,11 +382,12 @@ class QueuedJobsTable extends Table {
 	 * from the specified group (or any if null).
 	 *
 	 * @param array $capabilities Available QueueWorkerTasks.
-	 * @param string|null $group Request a job from this group, (from any group if null)
-	 * @param int|null $pid runner's pid
+	 * @param array $groups Request a job from these groups (or exclude certain groups), or any otherwise.
+	 * @param array $types Request a job from these types (or exclude certain types), or any otherwise.
+     * @param int|null $pid runner's pid
 	 * @return \Queue\Model\Entity\QueuedJob|null
 	 */
-	public function requestJob(array $capabilities, $group = null, int $pid = null) {
+	public function requestJob(array $capabilities, array $groups = [], array $types = [], int $pid = null) {
 		$now = new Time();
 		$nowStr = $now->toDateTimeString();
 		$driverName = $this->_getDriverName();
