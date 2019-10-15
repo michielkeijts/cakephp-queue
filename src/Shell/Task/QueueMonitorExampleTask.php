@@ -8,7 +8,7 @@ namespace Queue\Shell\Task;
 /**
  * A Simple QueueTask example.
  */
-class QueueMonitorExampleTask extends QueueTask {
+class QueueMonitorExampleTask extends QueueTask implements AddInterface {
 
 	/**
 	 * Timeout for run, after which the Task is reassigned to a new worker.
@@ -18,15 +18,11 @@ class QueueMonitorExampleTask extends QueueTask {
 	public $timeout = 10;
 
 	/**
-	 * Number of times a failed instance of this task should be restarted before giving up.
-	 *
-	 * @var int
-	 */
-	public $retries = 1;
-
-	/**
 	 * MonitorExample add functionality.
 	 * Will create one example job in the queue, which later will be executed using run();
+	 *
+	 * To invoke from CLI execute:
+	 * - bin/cake queue add MonitorExample
 	 *
 	 * @return void
 	 */
@@ -37,14 +33,12 @@ class QueueMonitorExampleTask extends QueueTask {
 		$this->out('This job will only produce some console output on the worker that it runs on.');
 		$this->out(' ');
 		$this->out('To run a Worker use:');
-		$this->out('	bin/cake queue runworker');
+		$this->out('    bin/cake queue runworker');
 		$this->out(' ');
 		$this->out('You can find the sourcecode of this task in: ');
 		$this->out(__FILE__);
 		$this->out(' ');
-		/*
-		 * Adding a task of type 'example' with no additionally passed data
-		 */
+
 		$this->QueuedJobs->createJob('MonitorExample');
 		$this->success('OK, job created, now run the worker');
 	}
@@ -56,7 +50,7 @@ class QueueMonitorExampleTask extends QueueTask {
 	 *
 	 * @param array $data The array passed to QueuedJobsTable::createJob()
 	 * @param int $jobId The id of the QueuedJob entity
-	 * @return bool Success
+	 * @return void
 	 */
 	public function run(array $data, $jobId) {
 		$this->hr();
@@ -66,8 +60,6 @@ class QueueMonitorExampleTask extends QueueTask {
 		$this->doMonitoring();
 
 		$this->success(' -> Success, the MonitorExample Job was run. <-');
-
-		return true;
 	}
 
 	/**
@@ -87,7 +79,7 @@ class QueueMonitorExampleTask extends QueueTask {
 	}
 
 	/**
-	 * @return array
+	 * @return string[]
 	 */
 	protected function getSystemMemInfo() {
 		$data = explode("\n", file_get_contents('/proc/meminfo'));

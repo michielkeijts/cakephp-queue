@@ -1,11 +1,13 @@
 <?php
 namespace Queue\Test\TestCase\Controller\Admin;
 
-use Cake\Core\Configure;
 use Cake\I18n\FrozenTime;
 use Cake\ORM\TableRegistry;
 use Tools\TestSuite\IntegrationTestCase;
 
+/**
+ * @uses \Queue\Controller\Admin\QueueProcessesController
+ */
 class QueueProcessesControllerTest extends IntegrationTestCase {
 
 	/**
@@ -22,8 +24,6 @@ class QueueProcessesControllerTest extends IntegrationTestCase {
 	 */
 	public function tearDown() {
 		parent::tearDown();
-
-		Configure::delete('Queue');
 	}
 
 	/**
@@ -42,8 +42,6 @@ class QueueProcessesControllerTest extends IntegrationTestCase {
 	 * @return void
 	 */
 	public function testIndex() {
-		Configure::write('Queue.defaultworkertimeout', DAY);
-
 		$this->get(['prefix' => 'admin', 'plugin' => 'Queue', 'controller' => 'QueueProcesses', 'action' => 'index']);
 
 		$this->assertResponseCode(200);
@@ -104,8 +102,6 @@ class QueueProcessesControllerTest extends IntegrationTestCase {
 	 * @return void
 	 */
 	public function testCleanup() {
-		Configure::write('Queue.defaultworkertimeout', DAY);
-
 		/** @var \Queue\Model\Entity\QueueProcess $queueProcess */
 		$queueProcess = TableRegistry::get('Queue.QueueProcesses')->find()->firstOrFail();
 		$queueProcess->modified = new FrozenTime(time() - 4 * DAY);

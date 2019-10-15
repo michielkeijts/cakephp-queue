@@ -2,7 +2,6 @@
 /**
  * @author MGriesbach@gmail.com
  * @license http://www.opensource.org/licenses/mit-license.php The MIT License
- * @link http://github.com/MSeven/cakephp_queue
  */
 
 namespace Queue\Shell\Task;
@@ -10,7 +9,7 @@ namespace Queue\Shell\Task;
 /**
  * A Simple QueueTask example.
  */
-class QueueExampleTask extends QueueTask {
+class QueueExampleTask extends QueueTask implements AddInterface {
 
 	/**
 	 * Timeout for run, after which the Task is reassigned to a new worker.
@@ -20,15 +19,11 @@ class QueueExampleTask extends QueueTask {
 	public $timeout = 10;
 
 	/**
-	 * Number of times a failed instance of this task should be restarted before giving up.
-	 *
-	 * @var int
-	 */
-	public $retries = 1;
-
-	/**
 	 * Example add functionality.
 	 * Will create one example job in the queue, which later will be executed using run();
+	 *
+	 * To invoke from CLI execute:
+	 * - bin/cake queue add Example
 	 *
 	 * @return void
 	 */
@@ -40,14 +35,12 @@ class QueueExampleTask extends QueueTask {
 		$this->out('This job will only produce some console output on the worker that it runs on.');
 		$this->out(' ');
 		$this->out('To run a Worker use:');
-		$this->out('	bin/cake queue runworker');
+		$this->out('    bin/cake queue runworker');
 		$this->out(' ');
 		$this->out('You can find the sourcecode of this task in: ');
 		$this->out(__FILE__);
 		$this->out(' ');
-		/*
-		 * Adding a task of type 'example' with no additionally passed data
-		 */
+
 		$this->QueuedJobs->createJob('Example');
 		$this->success('OK, job created, now run the worker');
 	}
@@ -59,14 +52,13 @@ class QueueExampleTask extends QueueTask {
 	 *
 	 * @param array $data The array passed to QueuedJobsTable::createJob()
 	 * @param int $jobId The id of the QueuedJob entity
-	 * @return bool Success
+	 * @return void
 	 */
 	public function run(array $data, $jobId) {
 		$this->hr();
 		$this->out('CakePHP Queue Example task.');
 		$this->hr();
 		$this->success(' -> Success, the Example Job was run. <-');
-		return true;
 	}
 
 }

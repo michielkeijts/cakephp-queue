@@ -2,7 +2,6 @@
 /**
  * @author MGriesbach@gmail.com
  * @license http://www.opensource.org/licenses/mit-license.php The MIT License
- * @link http://github.com/MSeven/cakephp_queue
  */
 
 namespace Queue\Shell\Task;
@@ -10,9 +9,9 @@ namespace Queue\Shell\Task;
 use Cake\Console\ConsoleIo;
 
 /**
- * A Simple QueueTask example.
+ * A retry QueueTask example.
  */
-class QueueRetryExampleTask extends QueueTask {
+class QueueRetryExampleTask extends QueueTask implements AddInterface {
 
 	/**
 	 * Timeout for run, after which the Task is reassigned to a new worker.
@@ -48,6 +47,9 @@ class QueueRetryExampleTask extends QueueTask {
 	 * Example add functionality.
 	 * Will create one example job in the queue, which later will be executed using run();
 	 *
+	 * To invoke from CLI execute:
+	 * - bin/cake queue add RetryExample
+	 *
 	 * @return void
 	 */
 	public function add() {
@@ -58,7 +60,7 @@ class QueueRetryExampleTask extends QueueTask {
 		$this->out('This job will only produce some console output on the worker that it runs on.');
 		$this->out(' ');
 		$this->out('To run a Worker use:');
-		$this->out('	bin/cake queue runworker');
+		$this->out('    bin/cake queue runworker');
 		$this->out(' ');
 		$this->out('You can find the sourcecode of this task in: ');
 		$this->out(__FILE__);
@@ -70,9 +72,6 @@ class QueueRetryExampleTask extends QueueTask {
 
 		file_put_contents($this->file, '0');
 
-		/*
-		 * Adding a task of type 'example' with no additionally passed data
-		 */
 		$this->QueuedJobs->createJob('RetryExample');
 		$this->success('OK, job created, now run the worker');
 	}
@@ -84,7 +83,8 @@ class QueueRetryExampleTask extends QueueTask {
 	 *
 	 * @param array $data The array passed to QueuedJobsTable::createJob()
 	 * @param int $jobId The id of the QueuedJob entity
-	 * @return bool Success
+	 * @return void
+	 * @throws \Exception
 	 */
 	public function run(array $data, $jobId) {
 		$count = (int)file_get_contents($this->file);
@@ -97,16 +97,11 @@ class QueueRetryExampleTask extends QueueTask {
 		if ($count < 3) {
 			$count++;
 			file_put_contents($this->file, (string)$count);
-			$this->out(' -> Sry, the RetryExample Job failed. Try again. <-');
-			$this->out(' ');
-			$this->out(' ');
-			return false;
+			$this->abort(' -> Sry, the RetryExample Job failed. Try again. <-');
 		}
 
 		unlink($this->file);
 		$this->success(' -> Success, the RetryExample Job was run. <-');
-
-		return true;
 	}
 
 }

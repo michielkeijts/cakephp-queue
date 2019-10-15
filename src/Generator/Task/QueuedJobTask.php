@@ -8,7 +8,7 @@ use Queue\Queue\TaskFinder;
 class QueuedJobTask implements TaskInterface {
 
 	/**
-	 * @var array
+	 * @var string[]
 	 */
 	protected $aliases = [
 		'\Queue\Model\Table\QueuedJobsTable::createJob(0)',
@@ -24,6 +24,8 @@ class QueuedJobTask implements TaskInterface {
 		foreach ($models as $model => $className) {
 			$map[$model] = '\\' . $className . '::class';
 		}
+
+		ksort($map);
 
 		$result = [];
 		foreach ($this->aliases as $alias) {

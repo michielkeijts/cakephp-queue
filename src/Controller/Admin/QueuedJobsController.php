@@ -31,11 +31,16 @@ class QueuedJobsController extends AppController {
 	public function initialize() {
 		parent::initialize();
 
-		$this->QueuedJobs->initConfig();
-
-		$this->loadComponent('RequestHandler');
+		if (!$this->components()->has('RequestHandler')) {
+			$this->loadComponent('RequestHandler', [
+				'enableBeforeRedirect' => false,
+			]);
+		}
 
 		if (Configure::read('Queue.isSearchEnabled') === false || !Plugin::isLoaded('Search')) {
+			return;
+		}
+		if ($this->components()->has('Search')) {
 			return;
 		}
 		$this->loadComponent('Search.Prg', [
@@ -88,9 +93,8 @@ class QueuedJobsController extends AppController {
 	/**
 	 * View method
 	 *
-	 * @param string|null $id Queued Job id.
+	 * @param int|null $id Queued Job id.
 	 * @return \Cake\Http\Response|null
-	 * @throws \Cake\Datasource\Exception\RecordNotFoundException When record not found.
 	 */
 	public function view($id = null) {
 		$queuedJob = $this->QueuedJobs->get((int)$id, [
@@ -157,41 +161,40 @@ class QueuedJobsController extends AppController {
 				return $this->redirect(['action' => 'view', $queuedJob->id]);
 			}
 
-			$this->Flash->error(__('Please, try again.'));
+			$this->Flash->error(__d('queue', 'Please, try again.'));
 		}
 	}
 
 	/**
 	 * Edit method
 	 *
-	 * @param string|null $id Queued Job id.
+	 * @param int|null $id Queued Job id.
 	 * @return \Cake\Http\Response|null Redirects on successful edit, renders view otherwise.
-	 * @throws \Cake\Http\Exception\NotFoundException When record not found.
 	 */
 	public function edit($id = null) {
 		$queuedJob = $this->QueuedJobs->get($id, [
 			'contain' => []
 		]);
 		if ($queuedJob->completed) {
-			$this->Flash->error(__('The queued job is already completed.'));
-			return $this->redirect(['action' => 'index']);
+			$this->Flash->error(__d('queue', 'The queued job is already completed.'));
+			return $this->redirect(['action' => 'view', $id]);
 		}
 
 		if ($this->request->is(['patch', 'post', 'put'])) {
 			$queuedJob = $this->QueuedJobs->patchEntity($queuedJob, $this->request->getData());
 			if ($this->QueuedJobs->save($queuedJob)) {
-				$this->Flash->success(__('The queued job has been saved.'));
-				return $this->redirect(['action' => 'index']);
+				$this->Flash->success(__d('queue', 'The queued job has been saved.'));
+				return $this->redirect(['action' => 'view', $id]);
 			}
 
-			$this->Flash->error(__('The queued job could not be saved. Please try again.'));
+			$this->Flash->error(__d('queue', 'The queued job could not be saved. Please try again.'));
 		}
 
 		$this->set(compact('queuedJob'));
 	}
 
 	/**
-	 * @param string|null $id Queued Job id.
+	 * @param int|null $id Queued Job id.
 	 * @return \Cake\Http\Response|null Redirects on successful edit, renders view otherwise.
 	 */
 	public function data($id = null) {
@@ -201,19 +204,46 @@ class QueuedJobsController extends AppController {
 	/**
 	 * Delete method
 	 *
-	 * @param string|null $id Queued Job id.
+	 * @param int|null $id Queued Job id.
 	 * @return \Cake\Http\Response|null Redirects to index.
-	 * @throws \Cake\Datasource\Exception\RecordNotFoundException When record not found.
 	 */
 	public function delete($id = null) {
 		$this->request->allowMethod(['post', 'delete']);
 		$queuedJob = $this->QueuedJobs->get($id);
 		if ($this->QueuedJobs->delete($queuedJob)) {
-			$this->Flash->success(__('The queued job has been deleted.'));
+			$this->Flash->success(__d('queue', 'The queued job has been deleted.'));
 		} else {
-			$this->Flash->error(__('The queued job could not be deleted. Please try again.'));
+			$this->Flash->error(__d('queue', 'The queued job could not be deleted. Please try again.'));
 		}
 		return $this->redirect(['action' => 'index']);
+	}
+
+	/**
+	 * @return \Cake\Http\Response|null
+	 * @throws \Cake\Http\Exception\NotFoundException
+	 */
+	public function execute() {
+		if (!Configure::read('debug')) {
+			throw new NotFoundException('Only for local development. Security implications if open on deployment.');
+		}
+
+		if ($this->request->is(['patch', 'post', 'put'])) {
+			$data = (array)$this->request->getData();
+			if (empty($data['command'])) {
+				$this->Flash->error('Command is required');
+				return null;
+			}
+
+			$amount = $data['amount'];
+			unset($data['amount']);
+			for ($i = 0; $i < $amount; $i++) {
+				$this->QueuedJobs->createJob('Execute', $data);
+			}
+
+			$this->Flash->success(__d('queue', 'The requested job has been queued ' . $amount . 'x.'));
+
+			return $this->redirect(['action' => 'execute']);
+		}
 	}
 
 	/**
@@ -249,12 +279,12 @@ class QueuedJobsController extends AppController {
 
 				$this->QueuedJobs->createJob($jobType, null, $config);
 
-				$this->Flash->success(__('The requested job has been queued.'));
+				$this->Flash->success(__d('queue', 'The requested job has been queued.'));
 
 				return $this->redirect(['action' => 'test']);
 			}
 
-			$this->Flash->error(__('The job could not be queued. Please try again.'));
+			$this->Flash->error(__d('queue', 'The job could not be queued. Please try again.'));
 		}
 
 		$this->set(compact('tasks', 'queuedJob'));

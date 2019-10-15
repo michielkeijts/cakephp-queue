@@ -13,9 +13,7 @@ use Cake\ORM\Table;
 use Cake\ORM\TableRegistry;
 use InvalidArgumentException;
 use Queue\Model\Entity\QueuedJob;
-use RecursiveDirectoryIterator;
-use RecursiveIteratorIterator;
-use RegexIterator;
+use Queue\Queue\Config;
 use RuntimeException;
 use Cake\I18n\Time;
 
@@ -30,14 +28,14 @@ if (!defined('SIGTERM')) {
  * @method \Queue\Model\Entity\QueuedJob get($primaryKey, $options = [])
  * @method \Queue\Model\Entity\QueuedJob newEntity($data = null, array $options = [])
  * @method \Queue\Model\Entity\QueuedJob[] newEntities(array $data, array $options = [])
- * @method \Queue\Model\Entity\QueuedJob|bool save(\Cake\Datasource\EntityInterface $entity, $options = [])
+ * @method \Queue\Model\Entity\QueuedJob|false save(\Cake\Datasource\EntityInterface $entity, $options = [])
  * @method \Queue\Model\Entity\QueuedJob patchEntity(\Cake\Datasource\EntityInterface $entity, array $data, array $options = [])
  * @method \Queue\Model\Entity\QueuedJob[] patchEntities($entities, array $data, array $options = [])
  * @method \Queue\Model\Entity\QueuedJob findOrCreate($search, callable $callback = null, $options = [])
  * @mixin \Cake\ORM\Behavior\TimestampBehavior
  * @method \Queue\Model\Entity\QueuedJob saveOrFail(\Cake\Datasource\EntityInterface $entity, $options = [])
  * @mixin \Search\Model\Behavior\SearchBehavior
- * @property \Queue\Model\Table\QueueProcessesTable|\Cake\ORM\Association\BelongsTo $WorkerProcesses
+ * @property \Queue\Model\Table\QueueProcessesTable&\Cake\ORM\Association\BelongsTo $WorkerProcesses
  */
 class QueuedJobsTable extends Table {
 
@@ -53,16 +51,9 @@ class QueuedJobsTable extends Table {
 	public $rateHistory = [];
 
 	/**
-	 * @var array
-	 */
-	public $findMethods = [
-		'progress' => true,
-	];
-
-	/**
 	 * @var string|null
 	 */
-	protected $_key = null;
+	protected $_key;
 
 	/**
 	 * set connection name
@@ -129,7 +120,7 @@ class QueuedJobsTable extends Table {
 			->value('job_type')
 			->like('search', ['field' => ['job_group', 'reference'], 'before' => true, 'after' => true])
 			->add('status', 'Search.Callback', [
-				'callback' => function (Query $query, $args, $filter) {
+				'callback' => function (Query $query, array $args, $filter) {
 					$status = $args['status'];
 					if ($status === 'completed') {
 						$query->where(['completed IS NOT' => null]);
@@ -147,28 +138,6 @@ class QueuedJobsTable extends Table {
 			]);
 
 		return $searchManager;
-	}
-
-	/**
-	 * @deprecated Manually assert config via bootstrapping.
-	 *
-	 * @return void
-	 */
-	public function initConfig() {
-		// Local config without extra config file
-		$conf = (array)Configure::read('Queue');
-		if (!empty($conf['configLoaded'])) {
-			return;
-		}
-
-		// Fallback to Plugin config which can be overwritten via local app config.
-		Configure::load('Queue.app_queue');
-		$defaultConf = (array)Configure::read('Queue');
-
-		$conf += $defaultConf;
-		$conf['configLoaded'] = true;
-
-		Configure::write('Queue', $conf);
 	}
 
 	/**
@@ -280,6 +249,11 @@ class QueuedJobsTable extends Table {
 						$runtime = $query->func()->avg("DATEDIFF(s, '1970-01-01 00:00:00', completed) - DATEDIFF(s, '1970-01-01 00:00:00', fetched)");
 						$fetchdelay = $query->func()->avg("DATEDIFF(s, '1970-01-01 00:00:00', fetched) - (CASE WHEN notbefore IS NULL THEN DATEDIFF(s, '1970-01-01 00:00:00', created) ELSE DATEDIFF(s, '1970-01-01 00:00:00', notbefore) END)");
 						break;
+					case static::DRIVER_POSTGRES:
+						$alltime = $query->func()->avg('EXTRACT(EPOCH FROM completed) - EXTRACT(EPOCH FROM created)');
+						$runtime = $query->func()->avg('EXTRACT(EPOCH FROM completed) - EXTRACT(EPOCH FROM fetched)');
+						$fetchdelay = $query->func()->avg('EXTRACT(EPOCH FROM fetched) - CASE WHEN notbefore IS NULL then EXTRACT(EPOCH FROM created) ELSE EXTRACT(EPOCH FROM notbefore) END');
+						break;
 				}
 					/**
 						 * @var \Cake\ORM\Query
@@ -320,6 +294,9 @@ class QueuedJobsTable extends Table {
 			switch ($driverName) {
 				case static::DRIVER_SQLSERVER:
 					$runtime = $query->newExpr("DATEDIFF(s, '1970-01-01 00:00:00', completed) - DATEDIFF(s, '1970-01-01 00:00:00', fetched)");
+					break;
+				case static::DRIVER_POSTGRES:
+					$runtime = $query->newExpr('EXTRACT(EPOCH FROM completed) - EXTRACT(EPOCH FROM fetched)');
 					break;
 			}
 
@@ -372,6 +349,8 @@ class QueuedJobsTable extends Table {
 
 				$result[$jobType][$day] = 0;
 			}
+
+			ksort($result[$jobType]);
 		}
 
 		return $result;
@@ -400,7 +379,7 @@ class QueuedJobsTable extends Table {
 				break;
 			case static::DRIVER_POSTGRES:
 				$age = $query->newExpr()
-					->add('COALESCE((EXTRACT(EPOCH FROM now()) - EXTRACT(EPOCH FROM notbefore)), 0)');
+					->add('COALESCE(EXTRACT(EPOCH FROM notbefore) - (EXTRACT(EPOCH FROM now())), 0)');
 				break;
 		}
 		$options = [
@@ -417,6 +396,59 @@ class QueuedJobsTable extends Table {
 				'id' => 'ASC',
 			]
 		];
+
+		$costConstraints = [];
+		foreach ($capabilities as $capability) {
+			if (!$capability['costs']) {
+				continue;
+			}
+
+			$costConstraints[$capability['name']] = $capability['costs'];
+		}
+
+		$uniqueConstraints = [];
+		foreach ($capabilities as $capability) {
+			if (!$capability['unique']) {
+				continue;
+			}
+
+			$uniqueConstraints[$capability['name']] = $capability['name'];
+		}
+
+		/** @var \Queue\Model\Entity\QueuedJob[] $runningJobs */
+		$runningJobs = [];
+		if ($costConstraints || $uniqueConstraints) {
+			$constraintJobs = array_keys($costConstraints + $uniqueConstraints);
+			$runningJobs = $this->find('queued')
+				->contain(['WorkerProcesses'])
+				->where(['QueuedJobs.job_type IN' => $constraintJobs, 'QueuedJobs.workerkey IS NOT' => null, 'QueuedJobs.workerkey !=' => $this->_key, 'WorkerProcesses.modified >' => Config::defaultworkertimeout()])
+				->all()
+				->toArray();
+		}
+
+		$costs = 0;
+		$server = $this->WorkerProcesses->buildServerString();
+		foreach ($runningJobs as $runningJob) {
+			if (isset($uniqueConstraints[$runningJob->job_type])) {
+				$types[] = '-' . $runningJob->job_type;
+				continue;
+			}
+
+			if ($runningJob->worker_process->server === $server && isset($costConstraints[$runningJob->job_type])) {
+				$costs += $costConstraints[$runningJob->job_type];
+			}
+		}
+
+		if ($costs) {
+			$left = 100 - $costs;
+			foreach ($capabilities as $capability) {
+				if (!$capability['costs'] || $capability['costs'] < $left) {
+					continue;
+				}
+
+				$types[] = '-' . $capability['name'];
+			}
+		}
 
 		if ($groups) {
 			$options['conditions'] = $this->addFilter($options['conditions'], 'job_group', $groups);
@@ -450,6 +482,8 @@ class QueuedJobsTable extends Table {
 			if (array_key_exists('rate', $task) && $tmp['job_type'] && array_key_exists($tmp['job_type'], $this->rateHistory)) {
 				switch ($driverName) {
 					case static::DRIVER_POSTGRES:
+						$tmp['EXTRACT(EPOCH FROM NOW()) >='] = $this->rateHistory[$tmp['job_type']] + $task['rate'];
+						break;
 					case static::DRIVER_MYSQL:
 						$tmp['UNIX_TIMESTAMP() >='] = $this->rateHistory[$tmp['job_type']] + $task['rate'];
 						break;
@@ -654,28 +688,6 @@ class QueuedJobsTable extends Table {
 		$this->deleteAll([
 			'completed <' => time() - (int)Configure::read('Queue.cleanuptimeout'),
 		]);
-		$pidFilePath = Configure::read('Queue.pidfilepath');
-		if (!$pidFilePath) {
-			return;
-		}
-
-		// Deprecated: Will be removed, use DB here
-		// Remove all old pid files left over
-		$timeout = time() - 2 * (int)Configure::read('Queue.cleanuptimeout');
-		$Iterator = new RegexIterator(
-			new RecursiveIteratorIterator(new RecursiveDirectoryIterator($pidFilePath)),
-			'/^.+\_.+\.(pid)$/i',
-			RegexIterator::MATCH
-		);
-		foreach ($Iterator as $file) {
-			if ($file->isFile()) {
-				$file = $file->getPathname();
-				$lastModified = filemtime($file);
-				if ($timeout > $lastModified) {
-					unlink($file);
-				}
-			}
-		}
 	}
 
 	/**
@@ -699,7 +711,20 @@ class QueuedJobsTable extends Table {
 	}
 
 	/**
+	 * Custom find method, as in `find('queued', ...)`.
+	 *
+	 * @param \Cake\ORM\Query $query The query to find with
+	 * @param array $options The options to find with
+	 * @return \Cake\ORM\Query The query builder
+	 */
+	public function findQueued(Query $query, array $options) {
+		return $query->where(['completed IS' => null]);
+	}
+
+	/**
 	 * Custom find method, as in `find('progress', ...)`.
+	 *
+	 * @deprecated Unused right now, needs fixing.
 	 *
 	 * @param string $state Current state
 	 * @param array $query Parameters
@@ -753,6 +778,7 @@ class QueuedJobsTable extends Table {
 	 * @return void
 	 */
 	public function clearDoublettes() {
+		/** @var array $x */
 		$x = $this->_connection->query('SELECT max(id) as id FROM `' . $this->getTable() . '`
 	WHERE completed is NULL
 	GROUP BY data
@@ -818,32 +844,19 @@ class QueuedJobsTable extends Table {
 	 * @return array
 	 */
 	public function getProcesses($forThisServer = false) {
-		$pidFilePath = Configure::read('Queue.pidfilepath');
-		if (!$pidFilePath) {
-			/** @var \Queue\Model\Table\QueueProcessesTable $QueueProcesses */
-			$QueueProcesses = TableRegistry::getTableLocator()->get('Queue.QueueProcesses');
-			$query = $QueueProcesses->findActive()
-				->where(['terminate' => false]);
-			if ($forThisServer) {
-				$query = $query->where(['server' => $QueueProcesses->buildServerString()]);
-			}
-
-			$processes = $query
-				->enableHydration(false)
-				->find('list', ['keyField' => 'pid', 'valueField' => 'modified'])
-				->all()
-				->toArray();
-
-			return $processes;
+		/** @var \Queue\Model\Table\QueueProcessesTable $QueueProcesses */
+		$QueueProcesses = TableRegistry::getTableLocator()->get('Queue.QueueProcesses');
+		$query = $QueueProcesses->findActive()
+			->where(['terminate' => false]);
+		if ($forThisServer) {
+			$query = $query->where(['server' => $QueueProcesses->buildServerString()]);
 		}
 
-		// Deprecated: Will be removed, use DB here
-		$processes = [];
-		foreach (glob($pidFilePath . 'queue_*.pid') as $filename) {
-			$time = filemtime($filename);
-			preg_match('/\bqueue_([0-9a-z]+)\.pid$/', $filename, $matches);
-			$processes[$matches[1]] = $time;
-		}
+		$processes = $query
+			->enableHydration(false)
+			->find('list', ['keyField' => 'pid', 'valueField' => 'modified'])
+			->all()
+			->toArray();
 
 		return $processes;
 	}
@@ -851,7 +864,7 @@ class QueuedJobsTable extends Table {
 	/**
 	 * Soft ending of a running job, e.g. when migration is starting
 	 *
-	 * @param string $pid
+	 * @param int|null $pid
 	 * @return void
 	 */
 	public function endProcess($pid) {
@@ -879,8 +892,6 @@ class QueuedJobsTable extends Table {
 			return;
 		}
 
-		$pidFilePath = Configure::read('Queue.pidfilepath');
-
 		$killed = false;
 		if (function_exists('posix_kill')) {
 			$killed = posix_kill($pid, $sig);
@@ -890,17 +901,8 @@ class QueuedJobsTable extends Table {
 		}
 		sleep(1);
 
-		if (!$pidFilePath) {
-			$QueueProcesses = TableRegistry::get('Queue.QueueProcesses');
-			$QueueProcesses->deleteAll(['pid' => $pid]);
-			return;
-		}
-
-		// Deprecated: Will be removed, use DB here
-		$file = $pidFilePath . 'queue_' . $pid . '.pid';
-		if (file_exists($file)) {
-			unlink($file);
-		}
+		$QueueProcesses = TableRegistry::get('Queue.QueueProcesses');
+		$QueueProcesses->deleteAll(['pid' => $pid]);
 	}
 
 	/**
@@ -918,7 +920,7 @@ class QueuedJobsTable extends Table {
 	/**
 	 * @param array $conditions
 	 * @param string $key
-	 * @param array $values
+	 * @param string[] $values
 	 * @return array
 	 */
 	protected function addFilter(array $conditions, $key, array $values) {
@@ -933,10 +935,10 @@ class QueuedJobsTable extends Table {
 		}
 
 		if ($include) {
-			$conditions[$key . ' IN'] = $include;
+			$conditions[$key . ' IN'] = array_unique($include);
 		}
 		if ($exclude) {
-			$conditions[$key . ' NOT IN'] = $exclude;
+			$conditions[$key . ' NOT IN'] = array_unique($exclude);
 		}
 
 		return $conditions;

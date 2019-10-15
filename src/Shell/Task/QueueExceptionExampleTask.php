@@ -2,12 +2,12 @@
 
 namespace Queue\Shell\Task;
 
-use RuntimeException;
+use Queue\Model\QueueException;
 
 /**
- * A Simple QueueTask example.
+ * An exception throwing QueueTask example.
  */
-class QueueExceptionExampleTask extends QueueTask {
+class QueueExceptionExampleTask extends QueueTask implements AddInterface {
 
 	/**
 	 * Timeout for run, after which the Task is reassigned to a new worker.
@@ -17,35 +17,28 @@ class QueueExceptionExampleTask extends QueueTask {
 	public $timeout = 10;
 
 	/**
-	 * Number of times a failed instance of this task should be restarted before giving up.
-	 *
-	 * @var int
-	 */
-	public $retries = 2;
-
-	/**
 	 * Example add functionality.
 	 * Will create one example job in the queue, which later will be executed using run();
+	 *
+	 * To invoke from CLI execute:
+	 * - bin/cake queue add ExceptionExample
 	 *
 	 * @return void
 	 */
 	public function add() {
-		$this->out('CakePHP Queue Exception Example task.');
+		$this->out('CakePHP Queue ExceptionExample task.');
 		$this->hr();
 		$this->out('This is a very simple example of a QueueTask and how exceptions are handled.');
 		$this->out('I will now add an example Job into the Queue.');
 		$this->out('This job will only produce some console output on the worker that it runs on.');
 		$this->out(' ');
 		$this->out('To run a Worker use:');
-		$this->out('	bin/cake queue runworker');
+		$this->out('    bin/cake queue runworker');
 		$this->out(' ');
 		$this->out('You can find the sourcecode of this task in: ');
 		$this->out(__FILE__);
 		$this->out(' ');
 
-		/*
-		 * Adding a task of type 'example' with no additionally passed data
-		 */
 		$this->QueuedJobs->createJob('ExceptionExample');
 		$this->success('OK, job created, now run the worker');
 	}
@@ -57,15 +50,15 @@ class QueueExceptionExampleTask extends QueueTask {
 	 *
 	 * @param array $data The array passed to QueuedJobsTable::createJob()
 	 * @param int $jobId The id of the QueuedJob entity
-	 * @return bool Success
-	 * @throws \RuntimeException
+	 * @return void
+	 * @throws \Queue\Model\QueueException
 	 */
 	public function run(array $data, $jobId) {
 		$this->hr();
-		$this->out('CakePHP Queue Exception Example task.');
+		$this->out('CakePHP Queue ExceptionExample task.');
 		$this->hr();
 
-		throw new RuntimeException('Exception demo :-)');
+		throw new QueueException('Exception demo :-)');
 	}
 
 }

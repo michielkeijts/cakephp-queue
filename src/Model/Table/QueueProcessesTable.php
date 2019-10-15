@@ -7,6 +7,7 @@ use Cake\ORM\Table;
 use Cake\Validation\Validator;
 use Cake\ORM\Query;
 use Queue\Model\ProcessEndingException;
+use Queue\Queue\Config;
 
 /**
  * QueueProcesses Model
@@ -14,7 +15,7 @@ use Queue\Model\ProcessEndingException;
  * @method \Queue\Model\Entity\QueueProcess get($primaryKey, $options = [])
  * @method \Queue\Model\Entity\QueueProcess newEntity($data = null, array $options = [])
  * @method \Queue\Model\Entity\QueueProcess[] newEntities(array $data, array $options = [])
- * @method \Queue\Model\Entity\QueueProcess|bool save(\Cake\Datasource\EntityInterface $entity, $options = [])
+ * @method \Queue\Model\Entity\QueueProcess|false save(\Cake\Datasource\EntityInterface $entity, $options = [])
  * @method \Queue\Model\Entity\QueueProcess patchEntity(\Cake\Datasource\EntityInterface $entity, array $data, array $options = [])
  * @method \Queue\Model\Entity\QueueProcess[] patchEntities($entities, array $data, array $options = [])
  * @method \Queue\Model\Entity\QueueProcess findOrCreate($search, callable $callback = null, $options = [])
@@ -82,7 +83,7 @@ class QueueProcessesTable extends Table {
 			->add('server', 'validateCount', [
 				'rule' => 'validateCount',
 				'provider' => 'table',
-				'message' => 'Too many workers running.',
+				'message' => 'Too many workers running. Check your `Queue.maxworkers` config.',
 			]);
 
 		return $validator;
@@ -95,7 +96,7 @@ class QueueProcessesTable extends Table {
 	 * @return bool
 	 */
 	public function validateCount($value, array $context) {
-		$maxWorkers = (int)Configure::read('Queue.maxworkers');
+		$maxWorkers = Config::maxworkers();
 		if (!$value || !$maxWorkers) {
 			return true;
 		}
@@ -112,7 +113,7 @@ class QueueProcessesTable extends Table {
 	 * @return \Cake\ORM\Query
 	 */
 	public function findActive() {
-		$timeout = (int)Configure::readOrFail('Queue.defaultworkertimeout');
+		$timeout = Config::defaultworkertimeout();
 		$thresholdTime = (new FrozenTime())->subSeconds($timeout);
 
 		return $this->find()->where(['modified > ' => $thresholdTime]);
@@ -197,68 +198,43 @@ class QueueProcessesTable extends Table {
 	 * @return int
 	 */
 	public function cleanEndedProcesses() {
-		$timeout = (int)Configure::readOrFail('Queue.defaultworkertimeout') * 2;
+		$timeout = Config::defaultworkertimeout();
 		$thresholdTime = (new FrozenTime())->subSeconds($timeout);
 
 		return $this->deleteAll(['modified <' => $thresholdTime]);
 	}
 
 	/**
-	 * If pid loggin is enabled, will return an array with
+	 * If pid logging is enabled, will return an array with
 	 * - time: Timestamp as FrozenTime object
 	 * - workers: int Count of currently running workers
 	 *
 	 * @return array
 	 */
 	public function status() {
-		$timeout = (int)Configure::readOrFail('Queue.defaultworkertimeout');
+		$timeout = Config::defaultworkertimeout();
 		$thresholdTime = (new FrozenTime())->subSeconds($timeout);
 
-		$pidFilePath = Configure::read('Queue.pidfilepath');
-		if (!$pidFilePath) {
-			$results = $this->find()
-				->where(['modified >' => $thresholdTime])
-				->orderDesc('modified')
-				->enableHydration(false)
-				->all()
-				->toArray();
+		$results = $this->find()
+			->where(['modified >' => $thresholdTime])
+			->orderDesc('modified')
+			->enableHydration(false)
+			->all()
+			->toArray();
 
-			if (!$results) {
-				return [];
-			}
-
-			$count = count($results);
-			$record = array_shift($results);
-			/** @var \Cake\I18n\FrozenTime $time */
-			$time = $record['modified'];
-
-			return [
-				'time' => $time,
-				'workers' => $count,
-			];
-		}
-
-		// Deprecated: Will be removed, use DB here
-		$file = $pidFilePath . 'queue.pid';
-		if (!file_exists($file)) {
+		if (!$results) {
 			return [];
 		}
 
-		$count = 0;
-		foreach (glob($pidFilePath . 'queue_*.pid') as $filename) {
-			$time = filemtime($filename);
-			if ($time >= $thresholdTime) {
-				$count++;
-			}
-		}
+		$count = count($results);
+		$record = array_shift($results);
+		/** @var \Cake\I18n\FrozenTime $time */
+		$time = $record['modified'];
 
-		$time = filemtime($file);
-
-		$res = [
-			'time' => $time ? new FrozenTime($time) : null,
+		return [
+			'time' => $time,
 			'workers' => $count,
 		];
-		return $res;
 	}
 
 	/**

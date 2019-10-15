@@ -5,7 +5,7 @@ namespace Queue\Shell\Task;
 /**
  * A Simple QueueTask example that runs for a while and updates the progress field.
  */
-class QueueProgressExampleTask extends QueueTask {
+class QueueProgressExampleTask extends QueueTask implements AddInterface {
 
 	/**
 	 * Timeout for run, after which the Task is reassigned to a new worker.
@@ -15,15 +15,11 @@ class QueueProgressExampleTask extends QueueTask {
 	public $timeout = 120;
 
 	/**
-	 * Number of times a failed instance of this task should be restarted before giving up.
-	 *
-	 * @var int
-	 */
-	public $retries = 1;
-
-	/**
 	 * Example add functionality.
 	 * Will create one example job in the queue, which later will be executed using run();
+	 *
+	 * To invoke from CLI execute:
+	 * - bin/cake queue add ProgressExample
 	 *
 	 * @return void
 	 */
@@ -35,14 +31,12 @@ class QueueProgressExampleTask extends QueueTask {
 		$this->out('This job will need at least 2 minutes to complete.');
 		$this->out(' ');
 		$this->out('To run a Worker use:');
-		$this->out('	bin/cake queue runworker');
+		$this->out('    bin/cake queue runworker');
 		$this->out(' ');
 		$this->out('You can find the sourcecode of this task in:');
 		$this->out(__FILE__);
 		$this->out(' ');
-		/*
-		 * Adding a task of type 'example' with no additionally passed data
-		 */
+
 		$data = [
 			'duration' => 2 * MINUTE
 		];
@@ -59,7 +53,7 @@ class QueueProgressExampleTask extends QueueTask {
 	 *
 	 * @param array $data The array passed to QueuedJobsTable::createJob()
 	 * @param int $jobId The id of the QueuedJob entity
-	 * @return bool Success
+	 * @return void
 	 */
 	public function run(array $data, $jobId) {
 		$this->hr();
@@ -75,7 +69,6 @@ class QueueProgressExampleTask extends QueueTask {
 
 		$this->hr();
 		$this->success(' -> Success, the ProgressExample Job was run. <-');
-		return true;
 	}
 
 }

@@ -5,14 +5,13 @@
 ```
 composer require dereuromark/cakephp-queue
 ```
-
-Enable the plugin within your config/bootstrap.php (unless you use loadAll):
+Load the plugin in your `src/Application.php`'s bootstrap() using:
 ```php
-Plugin::load('Queue');
+$this->addPlugin('Queue');
 ```
 If you want to also access the backend controller (not just using CLI), you need to use
 ```php
-Plugin::load('Queue', ['routes' => true]);
+$this->addPlugin('Queue', ['routes' => true]);
 ```
 
 Run the following command in the CakePHP console to create the tables using the Migrations plugin:
@@ -20,7 +19,7 @@ Run the following command in the CakePHP console to create the tables using the 
 bin/cake migrations migrate -p Queue
 ```
 
-It is also advised to have the `posix` PHP extension enabled. 
+It is also advised to have the `posix` PHP extension enabled.
 
 
 ## Configuration
@@ -60,16 +59,16 @@ You may create a file called `app_queue.php` inside your `config` folder (NOT th
     ```
 
     *Warning:* Do not use 0 if you are using a cronjob to permanantly start a new worker once in a while and if you do not exit on idle.
-    
-- Seconds of running time after which the PHP script of the worker will terminate (0 = unlimited):
+
+- Seconds of running time after which the PHP process of the worker will terminate (0 = unlimited):
 
     ```php
     $config['Queue']['workertimeout'] = 120 * 100;
     ```
 
-    *Warning:* Do not use 0 if you are using a cronjob to permanantly start a new worker once in a while and if you do not exit on idle. This is the last defense of the tool to prevent flooding too many processes. So make sure this is long enough to never cut off jobs, but also not too long, so the process count stays in manageable range.
+    *Warning:* Do not use 0 if you are using a cronjob to permanently start a new worker once in a while and if you do not exit on idle. This is the last defense of the tool to prevent flooding too many processes. So make sure this is long enough to never cut off jobs, but also not too long, so the process count stays in manageable range.
 
-- Should a Workerprocess quit when there are no more tasks for it to execute (true = exit, false = keep running):
+- Should a worker process quit when there are no more tasks for it to execute (true = exit, false = keep running):
 
     ```php
     $config['Queue']['exitwhennothingtodo'] = false;
@@ -81,12 +80,18 @@ You may create a file called `app_queue.php` inside your `config` folder (NOT th
     $config['Queue']['cleanuptimeout'] = 2592000; // 30 days
     ```
 
+- Max workers (per server):
+
+    ```php
+    $config['Queue']['maxworkers'] = 3 // Defaults to 1 (single worker can be run per server)
+    ```
+
 - Multi-server setup:
 
     ```php
     $config['Queue']['multiserver'] = true // Defaults to false (single server)
     ```
-    
+
     For multiple servers running either CLI/web separately, or even multiple CLI workers on top, make sure to enable this.
 
 - Use a different connection:
@@ -96,7 +101,7 @@ You may create a file called `app_queue.php` inside your `config` folder (NOT th
     ```
 
 Don't forget to load that config file with `Configure::load('app_queue');` in your bootstrap.
-You can also use `Plugin::load('Queue', ['bootstrap' => true]);` which will load your `app_queue.php` config file automatically.
+You can also use `$this->addPlugin('Queue', ['bootstrap' => true]);` which will load your `app_queue.php` config file automatically.
 
 Example `app_queue.php`:
 
@@ -112,10 +117,6 @@ return [
 You can also drop the configuration into an existing config file (recommended) that is already been loaded.
 The values above are the default settings which apply, when no configuration is found.
 
-Finally, make sure you allow the configured `pidfilepath` to be creatable and writable.
-Especially on deployment some `mkdir` command might be necessary.
-Set it to false to use the DB here instead, as well.
-
 #### Backend configuration
 
 - isSearchEnabled: Set to false if you do not want search/filtering capability.
@@ -128,7 +129,7 @@ You can also overwrite the template and as such change the asset library as well
 #### Configuration tips
 
 For the beginning maybe use not too many runners in parallel, and keep the runtimes rather short while starting new jobs every few minutes.
-You can then always increase spawning of runners if there is a shortage. 
+You can then always increase spawning of runners if there is a shortage.
 
 ### Task configuration
 
@@ -140,7 +141,7 @@ You can set two main things on each task as property: timeout and retries.
      * @var int
      */
     public $timeout = 120;
-    
+
     /**
      * Number of times a failed instance of this task should be restarted before giving up.
      *
@@ -164,7 +165,7 @@ namespace App\Shell\Task;
 
 ...
 
-class QueueYourNameForItTask extends QueueTask {
+class QueueYourNameForItTask extends QueueTask implements QueueTaskInterface {
 
     /**
      * @var int
@@ -179,20 +180,21 @@ class QueueYourNameForItTask extends QueueTask {
     /**
      * @param array $data The array passed to QueuedJobsTable::createJob()
      * @param int $jobId The id of the QueuedJob entity
-     * @return bool Success
+     * @return void
      */
     public function run(array $data, $jobId) {
         $this->loadModel('FooBars');
         if (!$this->FooBars->doSth()) {
             throw new RuntimeException('Couldnt do sth.');
         }
-
-        return true;
     }
-    
+
 }
 ```
-Make sure it returns a boolean result (true ideally), or otherwise throws an exception with a clear error message.
+Make sure it throws an exception with a clear error message in case of failure.
+
+Note: You can use the provided `Queue\Model\QueueException` if you do not need to include a strack trace.
+This is usually the default inside custom tasks.
 
 ## Usage
 
@@ -231,7 +233,7 @@ $this->loadModel('Queue.QueuedJobs');
 $this->QueuedJobs->createJob('Email', ['to' => 'user@example.org', ...]);
 
 // Somewhere in the model or lib
-TableRegistry::get('Queue.QueuedJobs')->createJob('Email',
+TableRegistry::getTableLocator()->get('Queue.QueuedJobs')->createJob('Email',
     ['to' => 'user@example.org', ...]);
 ```
 
@@ -253,7 +255,7 @@ That can be helpful when migrating servers and you only want to execute certain 
 
 ### Avoiding parallel (re)queueing
 
-For some background-tasks you will want to make sure only a single instance of this type is currently run. 
+For some background-tasks you will want to make sure only a single instance of this type is currently run.
 In your logic you can check on this using `isQueued()` and a unique reference:
 ```php
     /**
@@ -347,7 +349,7 @@ class FooTask extends QueueTask {
             ['status' => 'Done doing things'],
             ['id' => $jobId]
         );
-        
+
         return true;
     }
 }
@@ -358,10 +360,56 @@ Get progress status in web site and display:
 $job = $this->QueuedJobs->get($id);
 
 $progress = $job->progress; // A float from 0 to 1
-echo number_format($progress * 100, 0) . '%'; // Outputs 87% for example
+echo $this->Number->toPercentage($progress, 0, ['multiply' => true]) . '%'; // Outputs 87% for example
 
 $status = $job->status; // A string, make sure to escape
 echo h($status); // Outputs "Doing the last thing" for example
+```
+
+#### Progress Bar
+Using Tools plugin 1.9.6+ you can also use the more visual progress bar (or any custom one of yours):
+
+```php
+echo $this->QueueProgress->progressBar($queuedJob, 18);
+```
+![HTML5](bar_text.png)
+
+The length refers to the amount of chars to display.
+
+Using Tools plugin 1.9.7+ you can even use HTML5 progress bar (easier to style using CSS).
+For this it is recommended to add the textual one from above as fallback, though:
+```php
+$textProgressBar = $this->QueueProgress->progressBar($queuedJob, 18);
+echo $this->QueueProgress->htmlProgressBar($queuedJob, $textProgressBar);
+```
+
+![HTML5](bar_html.png)
+
+The text one will only be visible for older browsers that do not support the HTML5 tag.
+
+Make sure you loaded the helper in your AppView class.
+
+By default it first tries to use the actual `progress` stored as value 0...1.
+If that field is `null`, it tries to use the statistics of previously finished jobs of the same task
+to determine average length and displays the progress based on this.
+
+That also means you should set a high value for `cleanuptimeout` config (weeks/months) to make sure the average
+runtime data is available and meaningful.
+
+#### Timeout Progress Bar
+For those jobs that are created with a run time in the future (`notbefore`), you can also display progress
+until they are supposed to be run:
+
+```php
+echo $this->QueueProgress->timeoutProgressBar($queuedJob, 18);
+```
+It shows the progress as current time between `created` and `notbefore` boundaries more visually.
+
+Using Tools plugin 1.9.7+ you can even use HTML5 progress bar (easier to style using CSS).
+For this it is recommended to add the textual one from above as fallback, though:
+```php
+$textTimeoutProgressBar = $this->QueueProgress->timeoutProgressBar($queuedJob, 18);
+echo $this->QueueProgress->htmlTimeoutProgressBar($queuedJob, $textTimeoutProgressBar);
 ```
 
 ### Logging
@@ -405,6 +453,12 @@ bin/cake queue rerun FooBar
 ```
 You can add an additional reference to rerun a specific job.
 
+### Using custom finder
+You can use a convenience finder for tasks that are still queued, that means not yet finished.
+```php
+$query = $this->QueuedJobs->find('queued')->...;
+```
+This includes also failed ones if not filtered further using `where()` conditions.
 
 ### Notes
 
@@ -438,6 +492,10 @@ got a small overlap where two workers would run simultaneously. If you lower the
 get quite a few overlapping workers and thus more "parallel" processing power.
 Play around with it, but just don't shoot over the top.
 
+Also don't forget to set Configure key `'Queue.maxworkers'` to a reasonable value per server.
+If, for any reason, some of the jobs should take way longer, you want to avoid additional x workers to be started.
+It will then just not start now ones beyond this count until the already running ones are finished.
+This is an important server protection to avoid overloading.
 
 ## Admin backend
 
@@ -534,11 +592,11 @@ $data = [
     ],
     'vars' => [
         'myEntity' => $myEntity,
-        ...    
+        ...
     ],
 ];
  ```
- 
+
 You can also assemble an Email object manually and pass that along as settings directly:
 ```php
 $data = [
@@ -625,8 +683,6 @@ Use only predefined and safe code-snippets here!
 ### Multi Server Setup
 When working with multiple CLI servers there are several requirements for it to work smoothly:
 
-File approach does not work here, you must use the new DB approach (using queue_processes table).
-
 Make sure `env('SERVER_NAME')` or `gethostname()` return a unique name per server instance.
 This is required as PID alone is now not unique anymore.
 Each worker then registers itself as combination of `PID + server name`.
@@ -655,7 +711,7 @@ will also be aborting early.
 #### Ending workers per server
 A useful feature when having multiple servers and workers, and deploying separately, is to only end the workers on the server you are deploying to.
 
-For this make sure you have either `env('SERVER_NAME')` or `gethostname()` return a unique name per server instance (see above). 
+For this make sure you have either `env('SERVER_NAME')` or `gethostname()` return a unique name per server instance (see above).
 These are stored in the processes and as such you can then end them per instance that deploys.
 
 This snippet should be in the deploy script then instead.
@@ -667,6 +723,19 @@ You can check/verify the current server name using `bin/cake queue stats`.
 
 If you want to test locally, type `export SERVER_NAME=myserver1` and then run the above.
 
+#### Rate limiting and throttling
+
+The following configs can be made specific per Task, hardcoded on the class itself:
+- rate (defaults to `0` = disabled)
+- unique (defaults to `false` = disabled)
+- costs (defaults to `0` = disabled)
+
+Check if you need to use "rate" config (> 0) to avoid tasks being run too often/fast per worker per timeframe. 
+Currently you cannot rate limit it more globally however. You can use `unique` and `costs` config, however, to more globally restrict parallel runs for job types.
+
+
+Note: Once any task has either "unique" or "costs" enabled, the worker has to do a pre-query to fetch the data for this.
+Thus it is disabled by default for trivial use cases.
 
 ### Killing workers
 
@@ -692,19 +761,18 @@ Then you can kill them gracefully with `-15` (or forcefully with `-9`, not recom
 Locally, if you want to kill them all, usually `killapp -15 php` does the trick.
 Do not run this with production ones, though.
 
-The console kill commands are also registered here. So if you run a worker locally, 
+The console kill commands are also registered here. So if you run a worker locally,
 and you enter `Ctrl+C` or alike, it will also hard-kill this worker process.
-
-### Configure loading
-
-Use Configure `'Queue.configLoaded'` set to `true` to avoid the deprecated loading of the config inside the model layer.
-This part is deprecated and can cause troubles.
 
 ### Known Limitations
 
 #### Concurrent workers may execute the same job multiple times
 
 If you want to use multiple workers, please double check that all jobs have a high enough timeout (>> 2x max possible execution time of a job). Currently it would otherwise risk the jobs being run multiple times!
+
+#### Concurrent workers may execute the same job type multiple times
+
+If you need limiting of how many times a specific job type can be run in parallel, you need to find a custom solution here.
 
 
 ## IDE support
@@ -714,7 +782,7 @@ Especially if you use PHPStorm, this will make it possible to get support here.
 
 Include that plugin, set up your generator config and run e.g. `bin/cake phpstorm generate`.
 
-If you use `Plugin::load('Queue', ['bootstrap' => true, ...])`, the necessary config is already auto-included (recommended).
+If you use `$this->addPlugin('Queue', ['bootstrap' => true, ...])`, the necessary config is already auto-included (recommended).
 Otherwise you can manually include the Queue plugin generator tasks in your `config/app.php` on project level:
 
 ```php
@@ -730,12 +798,16 @@ return [
 ];
 ```
 
+## Baking new Queue task and test
+You can bake a new task and its test via
+```
+bin/cake bake_queue_task generate MyTaskName [-p PluginName]
+```
+
+It will generate a `QueueMyTaskNameTask` class in the right namespace.
+
+It will not overwrite existing classes unless you explicitly force this (after prompting).
 
 ## Contributing
 
-I am looking forward to your contributions.
-
-There are a few guidelines that I need contributors to follow:
-* Coding standards (`composer cs-check` to check and `composer cs-fix` to fix)
-* PHPStan (`composer phpstan`, might need `composer phpstan-setup` first)
-* Passing tests (`php phpunit.phar`)
+See [CONTRIBUTING.md](CONTRIBUTING.md).

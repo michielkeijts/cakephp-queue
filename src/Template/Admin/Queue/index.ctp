@@ -1,20 +1,27 @@
 <?php
 /**
  * @var \App\View\AppView $this
- * @var array $pendingDetails
+ * @var \Queue\Model\Entity\QueuedJob[] $pendingDetails
+ * @var string[] $tasks
+ * @var string[] $servers
+ * @var array $status
+ * @var int $new
+ * @var int $current
+ * @var array $data
  */
 use Cake\Core\Configure;
 ?>
 
 <nav class="col-md-3 col-xs-12 large-3 medium-4 columns" id="actions-sidebar">
-	<ul class="side-nav list-unstyled">
+	<ul class="side-nav nav nav-pills nav-stacked">
+		<li class="heading"><?= __d('queue', 'Actions') ?></li>
 		<li><?php echo $this->Form->postLink(__d('queue', 'Reset {0}', __d('queue', 'Queued Jobs')), ['action' => 'reset'], ['confirm' => __d('queue', 'Sure? This will make all failed jobs ready for re-run.'), 'class' => 'btn margin btn-default']); ?></li>
 		<li><?php echo $this->Form->postLink(__d('queue', 'Hard Reset {0}', __d('queue', 'Queued Jobs')), ['action' => 'hardReset'], ['confirm' => __d('queue', 'Sure? This will delete all jobs and completely reset the queue.'), 'class' => 'btn margin btn-warning']); ?></li>
 		<li><?php echo $this->Html->link(__d('queue', 'List {0}', __d('queue', 'Queued Jobs')), ['controller' => 'QueuedJobs', 'action' => 'index'], ['class' => 'btn margin btn-primary']); ?></li>
 	</ul>
 </nav>
 
-<div class="col-md-9 col-xs-12 large-9 medium-8 columns">
+<div class="content col-md-9 col-xs-12 large-9 medium-8 columns">
 <h1><?php echo __d('queue', 'Queue');?></h1>
 
 <div class="row">
@@ -42,43 +49,50 @@ use Cake\Core\Configure;
 
 		<h2><?php echo __d('queue', 'Queued Jobs'); ?></h2>
 		<p>
-		<?php
-		echo $new . '/' .$current;
-		?> task(s) newly await processing.
+		<?php echo __d('queue', '{0} task(s) newly await processing.', $new . '/' . $current); ?>
 		</p>
 		<ol>
 			<?php
-			foreach ($pendingDetails as $item) {
-				echo '<li>' . $this->Html->link($item['job_type'], ['controller' => 'QueuedJobs', 'action' => 'view', $item['id']]) . ' (ref <code>' . h($item['reference'] ?: '-') . '</code>, prio ' . $item['priority'] . '):';
+			foreach ($pendingDetails as $pendingJob) {
+				echo '<li>' . $this->Html->link($pendingJob->job_type, ['controller' => 'QueuedJobs', 'action' => 'view', $pendingJob->id]) . ' (ref <code>' . h($pendingJob->reference ?: '-') . '</code>, prio ' . $pendingJob->priority . '):';
 				echo '<ul>';
 
 				$reset = '';
-				if ($item['failed']) {
-					$reset = ' ' . $this->Form->postLink('Soft reset', ['action' => 'resetJob', $item['id']], ['confirm' => 'Sure?']);
-					$reset .= ' ' . $this->Form->postLink('Remove', ['action' => 'removeJob', $item['id']], ['confirm' => 'Sure?']);
-				} elseif ($item['fetched']) {
-					$reset .= ' ' . $this->Form->postLink('Remove', ['action' => 'removeJob', $item['id']], ['confirm' => 'Sure?']);
+				if ($pendingJob->failed) {
+					$reset = ' ' . $this->Form->postLink(__d('queue', 'Soft reset'), ['action' => 'resetJob', $pendingJob->id], ['confirm' => 'Sure?', 'class' => 'button primary btn margin btn-primary']);
+					$reset .= ' ' . $this->Form->postLink(__d('queue', 'Remove'), ['action' => 'removeJob', $pendingJob->id], ['confirm' => 'Sure?', 'class' => 'button secondary btn margin btn-default']);
+				} elseif ($pendingJob->fetched) {
+					$reset .= ' ' . $this->Form->postLink(__d('queue', 'Remove'), ['action' => 'removeJob', $pendingJob->id], ['confirm' => 'Sure?', 'class' => 'button secondary btn margin btn-default']);
 				}
 
 				$notBefore = '';
-				if ($item['notbefore']) {
-					$notBefore = ' (scheduled ' . $this->Time->nice($item['notbefore']) . ')';
+				if ($pendingJob->notbefore) {
+					$notBefore = ' (' . __d('queue', 'scheduled {0}', $this->Time->nice($pendingJob->notbefore)) . ')';
 				}
 
-				echo '<li>Created: ' . $this->Time->nice($item['created']) . $notBefore . '</li>';
+				echo '<li>' . __d('queue', 'Created') . ': ' . $this->Time->nice($pendingJob->created) . $notBefore . '</li>';
 
-
-				if ($item['fetched']) {
-					echo '<li>Fetched: ' . $this->Time->nice($item['fetched']) . '</li>';
+				if ($pendingJob->fetched) {
+					echo '<li>' . __d('queue', 'Fetched') . ': ' . $this->Time->nice($pendingJob->fetched) . '</li>';
 
 					$status = '';
-					if ($item['status']) {
-						$status = ' (status: ' . h($item['status']) . ')';
+					if ($pendingJob->status) {
+						$status = ' (' . __d('queue', 'status') . ': ' . h($pendingJob->status) . ')';
 					}
 
-					echo '<li>Progress: ' . $this->Number->toPercentage($item['progress'] * 100, 0) . $status . '</li>';
-					echo '<li>Failures: ' . $item['failed'] . $reset . '</li>';
-					echo '<li>Failure Message: ' . $this->Text->truncate($item['failure_message'], 200) . '</li>';
+					if (!$pendingJob->failed) {
+						echo '<li>';
+						echo __d('queue', 'Progress') . ': ';
+						echo $this->QueueProgress->progress($pendingJob) . $status;
+						$textProgressBar = $this->QueueProgress->progressBar($pendingJob, 18);
+						echo '<br>' . $this->QueueProgress->htmlProgressBar($pendingJob, $textProgressBar);
+						echo '</li>';
+					} else {
+						echo '<li>' . __d('queue', 'Failures') . ': ' . $pendingJob->failed . $reset . '</li>';
+						if ($pendingJob->failure_message) {
+							echo '<li>' . __d('queue', 'Failure Message') . ': ' . $this->Text->truncate($pendingJob->failure_message, 200) . '</li>';
+						}
+					}
 				}
 
 				echo '</ul>';
@@ -90,13 +104,13 @@ use Cake\Core\Configure;
 		<h2><?php echo __d('queue', 'Statistics'); ?></h2>
 		<ul>
 			<?php
-			foreach ($data as $item) {
-				echo '<li>' . h($item['job_type']) . ':';
+			foreach ($data as $row) {
+				echo '<li>' . h($row['job_type']) . ':';
 				echo '<ul>';
-				echo '<li>Finished Jobs in Database: ' . $item['num'] . '</li>';
-				echo '<li>Average Job existence: ' . $item['alltime'] . 's</li>';
-				echo '<li>Average Execution delay: ' . $item['fetchdelay'] . 's</li>';
-				echo '<li>Average Execution time: ' . $item['runtime'] . 's</li>';
+				echo '<li>Finished Jobs in Database: ' . $row['num'] . '</li>';
+				echo '<li>Average Job existence: ' . $row['alltime'] . 's</li>';
+				echo '<li>Average Execution delay: ' . $row['fetchdelay'] . 's</li>';
+				echo '<li>Average Execution time: ' . $row['runtime'] . 's</li>';
 				echo '</ul>';
 				echo '</li>';
 			}
@@ -159,7 +173,9 @@ use Cake\Core\Configure;
 		</ul>
 
 		<p><?php echo $this->Html->link(__d('queue', 'Trigger Delayed Test/Demo Job'), ['controller' => 'QueuedJobs', 'action' => 'test']); ?></p>
-
+		<?php if (Configure::read('debug')) { ?>
+		<p><?php echo $this->Html->link(__d('queue', 'Trigger Execute Job(s)'), ['controller' => 'QueuedJobs', 'action' => 'execute']); ?></p>
+		<?php } ?>
 	</div>
 </div>
 

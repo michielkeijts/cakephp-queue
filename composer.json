@@ -22,10 +22,10 @@
 		"cakephp/cakephp": "^3.7"
 	},
 	"require-dev": {
-		"cakephp/migrations": "^1.0",
+		"cakephp/migrations": "^2.0",
 		"friendsofcake/search": "^5.0",
-		"dereuromark/cakephp-tools": "^1.5.6",
-		"dereuromark/cakephp-ide-helper": "^0.12",
+		"dereuromark/cakephp-tools": "^1.9.7",
+		"dereuromark/cakephp-ide-helper": "^0.13.16",
 		"fig-r/psr2r-sniffer": "dev-master"
 	},
 	"suggest": {
@@ -51,11 +51,11 @@
 		}
 	},
 	"scripts": {
-		"phpstan": "phpstan analyse -c tests/phpstan.neon -l 4 src/",
-		"phpstan-setup": "cp composer.json composer.backup && composer require --dev phpstan/phpstan && mv composer.backup composer.json",
+		"phpstan": "phpstan analyse -c tests/phpstan.neon -l 5 src/",
+		"phpstan-setup": "cp composer.json composer.backup && composer require --dev phpstan/phpstan-shim && mv composer.backup composer.json",
 		"test": "php phpunit.phar",
-		"test-setup": "[ ! -f phpunit.phar ] && wget https://phar.phpunit.de/phpunit-6.5.8.phar && mv phpunit-6.5.8.phar phpunit.phar || true",
-		"cs-check": "phpcs -p --standard=vendor/fig-r/psr2r-sniffer/PSR2R/ruleset.xml --ignore=/cakephp-queue/vendor/,/tmp/,/logs/,/config/Migrations/ --extensions=php ./",
-		"cs-fix": "phpcbf -v --standard=vendor/fig-r/psr2r-sniffer/PSR2R/ruleset.xml --ignore=/cakephp-queue/vendor/,/tmp/,/logs/,/config/Migrations/ --extensions=php ./"
+		"test-setup": "[ ! -f phpunit.phar ] && wget https://phar.phpunit.de/phpunit-6.5.13.phar && mv phpunit-6.5.13.phar phpunit.phar || true",
+		"cs-check": "phpcs -p --standard=vendor/fig-r/psr2r-sniffer/PSR2R/ruleset.xml --ignore=/config/Migrations/ --extensions=php src/ tests/ config/",
+		"cs-fix": "phpcbf -v --standard=vendor/fig-r/psr2r-sniffer/PSR2R/ruleset.xml --ignore=/config/Migrations/ --extensions=php src/ tests/ config/"
 	}
 }

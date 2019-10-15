@@ -39,9 +39,8 @@ class QueuedProcessesController extends AppController {
 	/**
 	 * View method
 	 *
-	 * @param string|null $id Queue Process id.
+	 * @param int|null $id Queue Process id.
 	 * @return \Cake\Http\Response|null
-	 * @throws \Cake\Datasource\Exception\RecordNotFoundException When record not found.
 	 */
 	public function view($id = null) {
 		$queueProcess = $this->QueueProcesses->get($id, [
@@ -57,9 +56,8 @@ class QueuedProcessesController extends AppController {
 	/**
 	 * Edit method
 	 *
-	 * @param string|null $id Queue Process id.
+	 * @param int|null $id Queue Process id.
 	 * @return \Cake\Http\Response|null Redirects on successful edit, renders view otherwise.
-	 * @throws \Cake\Http\Exception\NotFoundException When record not found.
 	 */
 	public function edit($id = null) {
 		$queueProcess = $this->QueueProcesses->get($id, [
@@ -68,18 +66,18 @@ class QueuedProcessesController extends AppController {
 		if ($this->request->is(['patch', 'post', 'put'])) {
 			$queueProcess = $this->QueueProcesses->patchEntity($queueProcess, $this->request->getData());
 			if ($this->QueueProcesses->save($queueProcess)) {
-				$this->Flash->success(__('The queue process has been saved.'));
+				$this->Flash->success(__d('queue', 'The queue process has been saved.'));
 				return $this->redirect(['action' => 'index']);
 			}
 
-			$this->Flash->error(__('The queue process could not be saved. Please, try again.'));
+			$this->Flash->error(__d('queue', 'The queue process could not be saved. Please, try again.'));
 		}
 
 		$this->set(compact('queueProcess'));
 	}
 
 	/**
-	 * @param string|null $id Queue Process id.
+	 * @param int|null $id Queue Process id.
 	 * @return \Cake\Http\Response|null Redirects to index.
 	 */
 	public function terminate($id = null) {
@@ -89,17 +87,16 @@ class QueuedProcessesController extends AppController {
 			$queueProcess = $this->QueueProcesses->get($id);
 			$queueProcess->terminate = true;
 			$this->QueueProcesses->saveOrFail($queueProcess);
-			$this->Flash->success(__('The queue process has been deleted.'));
+			$this->Flash->success(__d('queue', 'The queue process has been deleted.'));
 		} catch (Exception $exception) {
-			$this->Flash->error(__('The queue process could not be deleted. Please, try again.'));
+			$this->Flash->error(__d('queue', 'The queue process could not be deleted. Please, try again.'));
 		}
 		return $this->redirect(['action' => 'index']);
 	}
 
 	/**
-	 * @param string|null $id Queue Process id.
+	 * @param int|null $id Queue Process id.
 	 * @return \Cake\Http\Response|null Redirects to index.
-	 * @throws \Cake\Datasource\Exception\RecordNotFoundException When record not found.
 	 */
 	public function delete($id = null) {
 		$this->request->allowMethod(['post', 'delete']);
@@ -111,9 +108,9 @@ class QueuedProcessesController extends AppController {
 		}
 
 		if ($this->QueueProcesses->delete($queueProcess)) {
-			$this->Flash->success(__('The queue process has been deleted.'));
+			$this->Flash->success(__d('queue', 'The queue process has been deleted.'));
 		} else {
-			$this->Flash->error(__('The queue process could not be deleted. Please, try again.'));
+			$this->Flash->error(__d('queue', 'The queue process could not be deleted. Please, try again.'));
 		}
 		return $this->redirect(['action' => 'index']);
 	}

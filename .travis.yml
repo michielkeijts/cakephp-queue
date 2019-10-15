@@ -1,8 +1,9 @@
 language: php
 
+sudo: false
+
 php:
   - 5.6
-  - 7.0
   - 7.3
 
 env:
@@ -10,6 +11,10 @@ env:
     - DB=mysql db_dsn='mysql://root@127.0.0.1/cakephp_test'
   global:
     - DEFAULT=1
+
+services:
+  - postgresql
+  - mysql
 
 matrix:
   fast_finish: true

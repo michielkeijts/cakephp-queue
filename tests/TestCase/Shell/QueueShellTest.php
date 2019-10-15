@@ -61,13 +61,10 @@ class QueueShellTest extends TestCase {
 
 		Configure::write('Queue', [
 			'sleeptime' => 2,
-			'gcprob' => 10,
 			'defaultworkertimeout' => 3,
-			'defaultworkerretries' => 1,
 			'workermaxruntime' => 5,
 			'cleanuptimeout' => 10,
 			'exitwhennothingtodo' => false,
-			'pidfilepath' => false, // TMP . 'queue' . DS,
 			'log' => false,
 		]);
 	}
@@ -248,7 +245,8 @@ class QueueShellTest extends TestCase {
 	 */
 	protected function _needsConnection() {
 		$config = ConnectionManager::getConfig('test');
-		$this->skipIf(strpos($config['driver'], 'Mysql') === false, 'Only Mysql is working yet for this.');
+		$skip = strpos($config['driver'], 'Mysql') === false && strpos($config['driver'], 'Postgres') === false;
+		$this->skipIf($skip, 'Only Mysql/Postgres is working yet for this.');
 	}
 
 }
