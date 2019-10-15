@@ -11,7 +11,7 @@ use Exception;
  * @method \Queue\Model\Entity\QueueProcess[]|\Cake\Datasource\ResultSetInterface paginate($object = null, array $settings = [])
  * @property \Queue\Model\Table\QueuedJobsTable $QueuedJobs
  */
-class QueueProcessesController extends AppController {
+class QueuedProcessesController extends AppController {
 
 	/**
 	 * @var array
