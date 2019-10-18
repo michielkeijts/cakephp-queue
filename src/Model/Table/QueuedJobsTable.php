@@ -15,7 +15,6 @@ use InvalidArgumentException;
 use Queue\Model\Entity\QueuedJob;
 use Queue\Queue\Config;
 use RuntimeException;
-use Cake\I18n\Time;
 
 // PHP 7.1+ has this defined
 if (!defined('SIGTERM')) {
@@ -90,13 +89,6 @@ class QueuedJobsTable extends Table {
 				'WorkerProcesses.workerkey = QueuedJobs.workerkey',
 			],
 		]);
-
-		$this->belongsTo('QueueProcesses', [
-            'foreignKey' => 'pid',
-			'bindingKey' => 'pid'
-        ]);
-		
-		$this->initConfig();
 	}
 
 	/**
@@ -361,13 +353,12 @@ class QueuedJobsTable extends Table {
 	 * from the specified group (or any if null).
 	 *
 	 * @param array $capabilities Available QueueWorkerTasks.
-	 * @param array $groups Request a job from these groups (or exclude certain groups), or any otherwise.
-	 * @param array $types Request a job from these types (or exclude certain types), or any otherwise.
-     * @param int|null $pid runner's pid
+	 * @param string[] $groups Request a job from these groups (or exclude certain groups), or any otherwise.
+	 * @param string[] $types Request a job from these types (or exclude certain types), or any otherwise.
 	 * @return \Queue\Model\Entity\QueuedJob|null
 	 */
-	public function requestJob(array $capabilities, array $groups = [], array $types = [], int $pid = null) {
-		$now = new Time();
+	public function requestJob(array $capabilities, array $groups = [], array $types = []) {
+		$now = $this->getDateTime();
 		$nowStr = $now->toDateTimeString();
 		$driverName = $this->_getDriverName();
 
@@ -495,7 +486,8 @@ class QueuedJobsTable extends Table {
 			$options['conditions']['OR'][] = $tmp;
 		}
 
-		$job = $this->getConnection()->transactional(function () use ($query, $options, $now, $pid) {
+		/** @var \Queue\Model\Entity\QueuedJob|null $job */
+		$job = $this->getConnection()->transactional(function () use ($query, $options, $now) {
 			$job = $query->find('all', $options)
 				->enableAutoFields(true)
 				->epilog('FOR UPDATE')
@@ -508,8 +500,7 @@ class QueuedJobsTable extends Table {
 			$key = $this->key();
 			$job = $this->patchEntity($job, [
 				'workerkey' => $key,
-				'fetched' => $now,
-				'pid' => $pid
+				'fetched' => $now
 			]);
 
 			return $this->saveOrFail($job);
@@ -578,24 +569,6 @@ class QueuedJobsTable extends Table {
 	}
 
 	/**
-	 * Find all jobs which are not finished, but running 
-	 * - fetched, not completed, not failed more than twice, failure_message
-	 * not set. 
-	 * @param Query $query
-	 * @param array $options
-	 * @return Query
-	 */	
-	public function findNotFinished(Query $query, array $options = [] ) :Query
-	{
-		return $query->where([
-			'fetched IS NOT' => NULL,
-			'completed IS' => NULL,
-			'failed <' => 2,
-			'failure_message IS' => NULL
-		]);
-	}
-
-	/**
 	 * Reset current jobs
 	 *
 	 * @param int|null $id
@@ -610,7 +583,6 @@ class QueuedJobsTable extends Table {
 			'failed' => 0,
 			'workerkey' => null,
 			'failure_message' => null,
-			'pid' => null
 		];
 		$conditions = [
 			'completed IS' => null,
