@@ -2,6 +2,7 @@
 
 namespace Queue\Shell;
 
+use Cake\Console\ConsoleOptionParser;
 use Cake\Console\Shell;
 use Cake\Core\App;
 use Cake\Core\Plugin;
@@ -12,7 +13,7 @@ class BakeQueueTaskShell extends Shell {
 	/**
 	 * @return void
 	 */
-	public function startup() {
+	public function startup(): void {
 		if ($this->param('quiet')) {
 			$this->interactive = false;
 		}
@@ -29,7 +30,7 @@ class BakeQueueTaskShell extends Shell {
 		$name = Inflector::camelize(Inflector::underscore($name));
 
 		$name = 'Queue' . $name . 'Task';
-		$plugin = $this->param('plugin');
+		$plugin = $this->param('plugin') ?: null;
 		if ($plugin) {
 			$plugin = Inflector::camelize(Inflector::underscore($plugin));
 		}
@@ -45,7 +46,7 @@ class BakeQueueTaskShell extends Shell {
 	 * @return void
 	 */
 	protected function generateTask($name, $plugin) {
-		$path = App::path('Shell/Task', $plugin);
+		$path = App::classPath('Shell/Task', $plugin);
 		if (!$path) {
 			$this->abort('Path not found for this plugin.');
 		}
@@ -78,7 +79,12 @@ class BakeQueueTaskShell extends Shell {
 	protected function generateTaskTest($name, $plugin) {
 		$testsPath = $plugin ? Plugin::path($plugin) . 'tests' . DS : ROOT . DS . 'tests' . DS;
 
-		$path = $testsPath . 'TestCase' . DS . 'Shell' . DS . 'Task' . DS . $name . 'Test.php';
+		$path = $testsPath . 'TestCase' . DS . 'Shell' . DS . 'Task' . DS;
+		if (!is_dir($path)) {
+			mkdir($path, 0770, true);
+		}
+
+		$path .= $name . 'Test.php';
 
 		$in = 'y';
 		if (file_exists($path)) {
@@ -99,19 +105,19 @@ class BakeQueueTaskShell extends Shell {
 	 *
 	 * @return \Cake\Console\ConsoleOptionParser
 	 */
-	public function getOptionParser() {
+	public function getOptionParser(): ConsoleOptionParser {
 		$subcommandParser = [
 			'arguments' => [
 				'name' => [
 					'default' => null,
 					'required' => true,
-				]
+				],
 			],
 			'options' => [
 				'plugin' => [
 					'short' => 'p',
 					'help' => 'Plugin',
-					'default' => '',
+					'default' => null,
 				],
 				'dry-run' => [
 					'short' => 'd',
@@ -149,10 +155,11 @@ use Queue\Shell\Task\QueueTask;
 class $name extends QueueTask {
 
 	/**
-	 * @param int \$jobId The id of the QueuedJob entity
+	 * @param array \$data Payload
+	 * @param int \$jobId The ID of the QueuedJob entity
 	 * @return void
 	 */
-	public function run(array \$data, \$jobId) {
+	public function run(array \$data, int \$jobId): void {
 	}
 
 }
@@ -186,20 +193,21 @@ use $taskClassNamespace;
 class $testName extends TestCase {
 
 	/**
-	 * @var array
+	 * @var string[]
 	 */
-	public \$fixtures = [
+	protected \$fixtures = [
 		'plugin.Queue.QueuedJobs',
 		'plugin.Queue.QueueProcesses',
 	];
-	
+
 	/**
 	 * @return void
 	 */
-	public function testRun() {
+	public function testRun(): void {
 		\$task = new $name();
-		
+
 		//TODO
+		//\$task->run(\$data, \$jobId);
 	}
 
 }

@@ -1,4 +1,5 @@
 <?php
+
 namespace Queue\Test\TestCase\View\Helper;
 
 use Cake\Datasource\ConnectionManager;
@@ -15,8 +16,8 @@ class QueueProgressHelperTest extends TestCase {
 	/**
 	 * @var array
 	 */
-	public $fixtures = [
-		'plugin.queue.QueuedJobs',
+	protected $fixtures = [
+		'plugin.Queue.QueuedJobs',
 	];
 
 	/**
@@ -32,7 +33,7 @@ class QueueProgressHelperTest extends TestCase {
 	/**
 	 * @return void
 	 */
-	public function setUp() {
+	public function setUp(): void {
 		parent::setUp();
 
 		$this->locale = ini_get('intl.default_locale');
@@ -45,7 +46,7 @@ class QueueProgressHelperTest extends TestCase {
 	/**
 	 * @return void
 	 */
-	public function tearDown() {
+	public function tearDown(): void {
 		parent::tearDown();
 
 		ini_set('intl.default_locale', $this->locale);
@@ -125,13 +126,13 @@ class QueueProgressHelperTest extends TestCase {
 		$this->_needsConnection();
 
 		/** @var \Queue\Model\Entity\QueuedJob $queuedJob */
-		$queuedJob = TableRegistry::get('Queue.QueuedJobs')->newEntity([
+		$queuedJob = TableRegistry::getTableLocator()->get('Queue.QueuedJobs')->newEntity([
 			'job_type' => 'Foo',
 			'created' => (new FrozenTime())->subHour(),
 			'fetched' => (new FrozenTime())->subHour(),
 			'completed' => (new FrozenTime())->subHour()->addMinutes(10),
 		]);
-		TableRegistry::get('Queue.QueuedJobs')->saveOrFail($queuedJob);
+		TableRegistry::getTableLocator()->get('Queue.QueuedJobs')->saveOrFail($queuedJob);
 
 		$queuedJob->completed = null;
 		$queuedJob->fetched = (new FrozenTime())->subMinute();

@@ -497,6 +497,7 @@ If, for any reason, some of the jobs should take way longer, you want to avoid a
 It will then just not start now ones beyond this count until the already running ones are finished.
 This is an important server protection to avoid overloading.
 
+
 ## Admin backend
 
 The plugin works completely without it, by just using the CLI shell commands.
@@ -505,8 +506,33 @@ to see how status of your queue, statistics and settings.
 Please note that this requires the [Tools plugin](https://github.com/dereuromark/cakephp-tools) to be loaded if you do not customize the view templates on project level.
 Also make sure you loaded the helpers needed (Tools.Format, Tools.Time as Time, etc).
 
-By default the templates should work fine in both Foundation (v5+) and Boostrap (v3+).
+By default the templates should work fine in both Foundation (v5+) and Bootstrap (v3+).
 Copy-and-paste to project level for any customization here.
+
+### Using backend actions
+You can add buttons to your specific app views to re-run a failed job, or to remove it.
+```php
+$this->loadHelper('Queue.Queue');
+if ($this->Queue->failed($queuedJob)) {
+    $query = ['redirect' => $this->request->getAttribute('here')];
+    echo $this->Form->postLink(
+        'Re-Run job',
+        ['prefix' => 'Admin', 'plugin' => 'Queue', 'controller' => 'Queue', 'action' => 'resetJob', $queuedJob->id, '?' => $query],
+        ['class' => 'button warning']
+    );
+    echo ' ';
+    echo $this->Form->postLink(
+        'Remove job',
+        ['prefix' => 'Admin', 'plugin' => 'Queue', 'controller' => 'Queue', 'action' => 'removeJob', $queuedJob->id, '?' => $query],
+        ['class' => 'button alert']
+    );
+}
+```
+The `redirect` query string element makes sure you are getting redirected back to this page (instead of Queue admin dashboard).
+
+Make sure you allow those actions to be accessed by the user (role) that can trigger this.
+Ideally, you also only display those buttons if that user has the access to do so.
+[TinyAuth](https://github.com/dereuromark/cakephp-tinyauth) can be used for that, for example.
 
 
 ## Tips for Development
@@ -527,42 +553,41 @@ Instead of manually adding job every time you want to send mail you can use exis
 
 ```php
 'EmailTransport' => [
-        'default' => [
-            'className' => 'Smtp',
-            // The following keys are used in SMTP transports
-            'host' => 'host@gmail.com',
-            'port' => 587,
-            'timeout' => 30,
-            'username' => 'username',
-            'password' => 'password',
-            //'client' => null,
-            'tls' => true,
-        ],
-        'queue' => [
-            'className' => 'Queue.Queue',
-            'transport' => 'default'
-        ]
+    'default' => [
+        'className' => 'Smtp',
+        // The following keys are used in SMTP transports
+        'host' => 'host@gmail.com',
+        'port' => 587,
+        'timeout' => 30,
+        'username' => 'username',
+        'password' => 'password',
+        'tls' => true,
     ],
+    'queue' => [
+        'className' => 'Queue.Queue',
+        'transport' => 'default',
+    ],
+],
 
-    'Email' => [
-        'default' => [
-            'transport' => 'queue',
-            'from' => 'no-reply@host.com',
-            'charset' => 'utf-8',
-            'headerCharset' => 'utf-8',
-        ],
+'Email' => [
+    'default' => [
+        'transport' => 'queue',
+        'from' => 'no-reply@host.com',
+        'charset' => 'utf-8',
+        'headerCharset' => 'utf-8',
     ],
+],
 ```
 
-This way each time you will `$email->send()` it will use `QueueTransport` as main to create job and worker will use `'transport'` setting to send mail.
+This way each time with `$mailer->deliver()` it will use `QueueTransport` as main to create job and worker will use `'transport'` setting to send mail.
 
 
 #### Difference between QueueTransport and SimpleQueueTransport
 
-* `QueueTransport` serializes whole email into the database and is useful when you have custom `Email` class.
-* `SimpleQueueTransport` extracts all data from email (to, bcc, template etc.) and then uses this to recreate email inside task, this
+* `QueueTransport` serializes whole email into the database and is useful when you have custom `Message` class.
+* `SimpleQueueTransport` extracts all data from Message (to, bcc, template etc.) and then uses this to recreate Message inside task, this
 is useful when dealing with emails which serialization would overflow database `data` field length.
-
+This can only be used for non-templated emails.
 
 ### Using built in Email task
 
@@ -576,11 +601,12 @@ $data = [
     ],
     'content' => $content,
 ];
-$queuedJobsTable = TableRegistry::get('Queue.QueuedJobs');
+$queuedJobsTable = TableRegistry::getTableLocator()->get('Queue.QueuedJobs');
 $queuedJobsTable->createJob('Email', $data);
 ```
 
-This will sent a plain email. Each settings key must have a matching setter method on the Email class.
+This will sent a plain email. Each settings key must have a matching setter method on the Message class.
+The prefix `set` will be auto-added here when calling it.
 
 If you want a templated email, you need to pass view vars instead of content:
 ```php
@@ -597,17 +623,31 @@ $data = [
 ];
  ```
 
-You can also assemble an Email object manually and pass that along as settings directly:
+You can also assemble a Mailer object manually and pass that along as settings directly:
 ```php
 $data = [
-    'settings' => $emailObject,
+    'settings' => $mailerObject,
     'content' => $content,
 ];
 ```
 
+Inside a controller you can for example do this for your mailers:
+```php
+$mailer = $this->getMailer('User');
+$mailer->viewBuilder()
+    ->setTemplate('register');
+$mailer->set...(...);
+
+$this->loadModel('Queue.QueuedJobs')->createJob(
+    'Email',
+    ['settings' => $mailer]
+);
+```
+Do not send your emails here, only assemble them. The Email Queue task triggers the `deliver()` method.
+
 ### Manually assembling your emails
 
-This is the most advised way to generate your asynchronous emails.
+This is the most customizable way to generate your asynchronous emails.
 
 Don't generate them directly in your code and pass them to the queue, instead just pass the minimum requirements, like non persistent data needed and the primary keys of the records that need to be included.
 So let's say someone posted a comment and you want to get notified.
@@ -622,7 +662,7 @@ Inside your CommentsTable class after saving the data you execute this hook:
 protected function _notifyAdmin(Comment $comment)
 {
     /** @var \Queue\Model\Table\QueuedJobsTable $QueuedJobs */
-    $QueuedJobs = TableRegistry::get('Queue.QueuedJobs');
+    $QueuedJobs = TableRegistry::getTableLocator()->get('Queue.QueuedJobs');
     $data = [
         'settings' => [
             'subject' => __('New comment submitted by {0}', $comment->name)
@@ -635,27 +675,27 @@ protected function _notifyAdmin(Comment $comment)
 }
 ```
 
-And your `QueueAdminEmailTask::run()` method:
+And your `QueueAdminEmailTask::run()` method (using `MailerAwareTrait`):
 
 ```php
-$this->Email = new Email();
-$this->Email->template('comment_notification');
+$this->getMailer('User');
+$this->Mailer->viewBuilder()->setTemplate('comment_notification');
 // ...
 if (!empty($data['vars'])) {
-    $this->Email->viewVars($data['vars']);
+    $this->Mailer->setViewVars($data['vars']);
 }
 
-return (bool)$this->Email->send();
+$this->Mailer->deliver();
 ```
 
 Make sure you got the template for it then, e.g.:
 
 ```php
-<?= $comment['name'] ?> ( <?= $comment['email'] ?> ) wrote:
+<?= $comment->name ?> ( <?= $comment->email ?> ) wrote:
 
-<?= $comment['message'] ?>
+<?= $comment->message ?>
 
-<?= $this->Url->build(['prefix' => 'admin', 'controller' => 'Comments', 'action'=> 'view', $comment['id']], true) ?>
+<?= $this->Url->build(['prefix' => 'Admin', 'controller' => 'Comments', 'action'=> 'view', $comment['id']], true) ?>
 ```
 
 This way all the generation is in the specific task and template and can be tested separately.
@@ -667,7 +707,7 @@ $data = [
     'command' => 'bin/cake importer run',
     'content' => $content,
 ];
-$queuedJobsTable = TableRegistry::get('Queue.QueuedJobs');
+$queuedJobsTable = TableRegistry::getTableLocator()->get('Queue.QueuedJobs');
 $queuedJobsTable->createJob('Execute', $data);
 ```
 
@@ -730,7 +770,7 @@ The following configs can be made specific per Task, hardcoded on the class itse
 - unique (defaults to `false` = disabled)
 - costs (defaults to `0` = disabled)
 
-Check if you need to use "rate" config (> 0) to avoid tasks being run too often/fast per worker per timeframe. 
+Check if you need to use "rate" config (> 0) to avoid tasks being run too often/fast per worker per timeframe.
 Currently you cannot rate limit it more globally however. You can use `unique` and `costs` config, however, to more globally restrict parallel runs for job types.
 
 
@@ -774,6 +814,11 @@ If you want to use multiple workers, please double check that all jobs have a hi
 
 If you need limiting of how many times a specific job type can be run in parallel, you need to find a custom solution here.
 
+
+## Generating links/URLS in CLI
+When you have Queue tasks and templates that need to create URLs, make sure you followed the core documentation
+on setting the `App.fullBaseUrl` config on your server.
+CLI itself does not know the URL your website is running on, so this value must be configured here for the generation to work.
 
 ## IDE support
 

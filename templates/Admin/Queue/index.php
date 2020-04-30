@@ -15,8 +15,9 @@ use Cake\Core\Configure;
 <nav class="col-md-3 col-xs-12 large-3 medium-4 columns" id="actions-sidebar">
 	<ul class="side-nav nav nav-pills nav-stacked">
 		<li class="heading"><?= __d('queue', 'Actions') ?></li>
-		<li><?php echo $this->Form->postLink(__d('queue', 'Reset {0}', __d('queue', 'Queued Jobs')), ['action' => 'reset'], ['confirm' => __d('queue', 'Sure? This will make all failed jobs ready for re-run.'), 'class' => 'btn margin btn-default']); ?></li>
-		<li><?php echo $this->Form->postLink(__d('queue', 'Hard Reset {0}', __d('queue', 'Queued Jobs')), ['action' => 'hardReset'], ['confirm' => __d('queue', 'Sure? This will delete all jobs and completely reset the queue.'), 'class' => 'btn margin btn-warning']); ?></li>
+		<li><?php echo $this->Form->postLink(__d('queue', 'Reset {0}', __d('queue', 'Failed Jobs')), ['action' => 'reset'], ['confirm' => __d('queue', 'Sure? This will make all failed jobs ready for re-run.'), 'class' => 'btn margin btn-default']); ?></li>
+		<li><?php echo $this->Form->postLink(__d('queue', 'Reset {0}', __d('queue', 'All Jobs')), ['action' => 'reset', '?' => ['full' => true]], ['confirm' => __d('queue', 'Sure? This will make all failed as well as still running jobs ready for re-run.'), 'class' => 'btn margin btn-default']); ?></li>
+		<li><?php echo $this->Form->postLink(__d('queue', 'Hard Reset {0}', __d('queue', 'Queue')), ['action' => 'hardReset'], ['confirm' => __d('queue', 'Sure? This will delete all jobs and completely reset the queue.'), 'class' => 'btn margin btn-warning']); ?></li>
 		<li><?php echo $this->Html->link(__d('queue', 'List {0}', __d('queue', 'Queued Jobs')), ['controller' => 'QueuedJobs', 'action' => 'index'], ['class' => 'btn margin btn-primary']); ?></li>
 	</ul>
 </nav>
@@ -58,7 +59,7 @@ use Cake\Core\Configure;
 				echo '<ul>';
 
 				$reset = '';
-				if ($pendingJob->failed) {
+				if ($this->Queue->hasFailed($pendingJob)) {
 					$reset = ' ' . $this->Form->postLink(__d('queue', 'Soft reset'), ['action' => 'resetJob', $pendingJob->id], ['confirm' => 'Sure?', 'class' => 'button primary btn margin btn-primary']);
 					$reset .= ' ' . $this->Form->postLink(__d('queue', 'Remove'), ['action' => 'removeJob', $pendingJob->id], ['confirm' => 'Sure?', 'class' => 'button secondary btn margin btn-default']);
 				} elseif ($pendingJob->fetched) {
@@ -80,7 +81,7 @@ use Cake\Core\Configure;
 						$status = ' (' . __d('queue', 'status') . ': ' . h($pendingJob->status) . ')';
 					}
 
-					if (!$pendingJob->failed) {
+					if (!$pendingJob->failed || !$pendingJob->failure_message) {
 						echo '<li>';
 						echo __d('queue', 'Progress') . ': ';
 						echo $this->QueueProgress->progress($pendingJob) . $status;
@@ -88,7 +89,9 @@ use Cake\Core\Configure;
 						echo '<br>' . $this->QueueProgress->htmlProgressBar($pendingJob, $textProgressBar);
 						echo '</li>';
 					} else {
-						echo '<li>' . __d('queue', 'Failures') . ': ' . $pendingJob->failed . $reset . '</li>';
+						echo '<li><i>' . $this->Queue->failureStatus($pendingJob) . '</i>';
+  						echo '<div>' . __d('queue', 'Failures') . ': ' . $this->Queue->fails($pendingJob) . $reset . '</div>';
+  						echo '</li>';
 						if ($pendingJob->failure_message) {
 							echo '<li>' . __d('queue', 'Failure Message') . ': ' . $this->Text->truncate($pendingJob->failure_message, 200) . '</li>';
 						}
@@ -138,7 +141,11 @@ use Cake\Core\Configure;
 		Current runtime configuration:
 		<ul>
 			<?php
-			$configurations = Configure::read('Queue');
+			$configurations = (array)Configure::read('Queue');
+			if (!$configurations) {
+				echo '<b>No configuration found</b>';
+			}
+
 			foreach ($configurations as $key => $configuration) {
 				echo '<li>';
 				if (is_dir($configuration)) {

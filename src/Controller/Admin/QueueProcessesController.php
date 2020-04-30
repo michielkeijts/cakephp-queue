@@ -1,4 +1,5 @@
 <?php
+
 namespace Queue\Controller\Admin;
 
 use App\Controller\AppController;
@@ -23,45 +24,48 @@ class QueuedProcessesController extends AppController {
 	];
 
 	/**
+	 * @return void
+	 */
+	public function initialize(): void {
+		parent::initialize();
+
+		$this->viewBuilder()->setHelpers(['Tools.Time', 'Tools.Format', 'Shim.Configure']);
+	}
+
+	/**
 	 * Index method
 	 *
-	 * @return \Cake\Http\Response|null
+	 * @return \Cake\Http\Response|null|void
 	 */
 	public function index() {
 		$queueProcesses = $this->paginate();
 
 		$this->set(compact('queueProcesses'));
-		$this->helpers[] = 'Tools.Format';
-		$this->helpers[] = 'Tools.Time';
-		$this->helpers[] = 'Shim.Configure';
 	}
 
 	/**
 	 * View method
 	 *
 	 * @param int|null $id Queue Process id.
-	 * @return \Cake\Http\Response|null
+	 * @return \Cake\Http\Response|null|void
 	 */
 	public function view($id = null) {
 		$queueProcess = $this->QueueProcesses->get($id, [
-			'contain' => []
+			'contain' => [],
 		]);
 
 		$this->set(compact('queueProcess'));
-		$this->helpers[] = 'Tools.Format';
-		$this->helpers[] = 'Tools.Time';
-		$this->helpers[] = 'Shim.Configure';
 	}
 
 	/**
 	 * Edit method
 	 *
 	 * @param int|null $id Queue Process id.
-	 * @return \Cake\Http\Response|null Redirects on successful edit, renders view otherwise.
+	 * @return \Cake\Http\Response|null|void Redirects on successful edit, renders view otherwise.
 	 */
 	public function edit($id = null) {
 		$queueProcess = $this->QueueProcesses->get($id, [
-			'contain' => []
+			'contain' => [],
 		]);
 		if ($this->request->is(['patch', 'post', 'put'])) {
 			$queueProcess = $this->QueueProcesses->patchEntity($queueProcess, $this->request->getData());
@@ -78,7 +82,7 @@ class QueuedProcessesController extends AppController {
 
 	/**
 	 * @param int|null $id Queue Process id.
-	 * @return \Cake\Http\Response|null Redirects to index.
+	 * @return \Cake\Http\Response|null|void Redirects to index.
 	 */
 	public function terminate($id = null) {
 		$this->request->allowMethod(['post', 'delete']);
@@ -96,7 +100,7 @@ class QueuedProcessesController extends AppController {
 
 	/**
 	 * @param int|null $id Queue Process id.
-	 * @return \Cake\Http\Response|null Redirects to index.
+	 * @return \Cake\Http\Response|null|void Redirects to index.
 	 */
 	public function delete($id = null) {
 		$this->request->allowMethod(['post', 'delete']);
@@ -116,7 +120,7 @@ class QueuedProcessesController extends AppController {
 	}
 
 	/**
-	 * @return \Cake\Http\Response|null Redirects to index.
+	 * @return \Cake\Http\Response|null|void Redirects to index.
 	 */
 	public function cleanup() {
 		$this->request->allowMethod(['post', 'delete']);

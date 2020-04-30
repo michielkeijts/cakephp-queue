@@ -5,12 +5,13 @@ namespace Queue\Model\Table;
 use ArrayObject;
 use Cake\Core\Configure;
 use Cake\Core\Plugin;
-use Cake\Event\Event;
+use Cake\Event\EventInterface;
 use Cake\Http\Exception\NotImplementedException;
 use Cake\I18n\FrozenTime;
 use Cake\ORM\Query;
 use Cake\ORM\Table;
 use Cake\ORM\TableRegistry;
+use Cake\Validation\Validator;
 use InvalidArgumentException;
 use Queue\Model\Entity\QueuedJob;
 use Queue\Queue\Config;
@@ -25,16 +26,21 @@ if (!defined('SIGTERM')) {
  * @author MGriesbach@gmail.com
  * @license http://www.opensource.org/licenses/mit-license.php The MIT License
  * @method \Queue\Model\Entity\QueuedJob get($primaryKey, $options = [])
- * @method \Queue\Model\Entity\QueuedJob newEntity($data = null, array $options = [])
+ * @method \Queue\Model\Entity\QueuedJob newEntity(array $data, array $options = [])
  * @method \Queue\Model\Entity\QueuedJob[] newEntities(array $data, array $options = [])
  * @method \Queue\Model\Entity\QueuedJob|false save(\Cake\Datasource\EntityInterface $entity, $options = [])
  * @method \Queue\Model\Entity\QueuedJob patchEntity(\Cake\Datasource\EntityInterface $entity, array $data, array $options = [])
- * @method \Queue\Model\Entity\QueuedJob[] patchEntities($entities, array $data, array $options = [])
- * @method \Queue\Model\Entity\QueuedJob findOrCreate($search, callable $callback = null, $options = [])
+ * @method \Queue\Model\Entity\QueuedJob[] patchEntities(iterable $entities, array $data, array $options = [])
+ * @method \Queue\Model\Entity\QueuedJob findOrCreate($search, ?callable $callback = null, $options = [])
  * @mixin \Cake\ORM\Behavior\TimestampBehavior
  * @method \Queue\Model\Entity\QueuedJob saveOrFail(\Cake\Datasource\EntityInterface $entity, $options = [])
  * @mixin \Search\Model\Behavior\SearchBehavior
  * @property \Queue\Model\Table\QueueProcessesTable&\Cake\ORM\Association\BelongsTo $WorkerProcesses
+ * @method \Queue\Model\Entity\QueuedJob newEmptyEntity()
+ * @method \Queue\Model\Entity\QueuedJob[]|\Cake\Datasource\ResultSetInterface|false saveMany(iterable $entities, $options = [])
+ * @method \Queue\Model\Entity\QueuedJob[]|\Cake\Datasource\ResultSetInterface saveManyOrFail(iterable $entities, $options = [])
+ * @method \Queue\Model\Entity\QueuedJob[]|\Cake\Datasource\ResultSetInterface|false deleteMany(iterable $entities, $options = [])
+ * @method \Queue\Model\Entity\QueuedJob[]|\Cake\Datasource\ResultSetInterface deleteManyOrFail(iterable $entities, $options = [])
  */
 class QueuedJobsTable extends Table {
 
@@ -59,7 +65,7 @@ class QueuedJobsTable extends Table {
 	 *
 	 * @return string
 	 */
-	public static function defaultConnectionName() {
+	public static function defaultConnectionName(): string {
 		$connection = Configure::read('Queue.connection');
 		if (!empty($connection)) {
 			return $connection;
@@ -74,7 +80,7 @@ class QueuedJobsTable extends Table {
 	 * @param array $config Configuration
 	 * @return void
 	 */
-	public function initialize(array $config) {
+	public function initialize(array $config): void {
 		parent::initialize($config);
 
 		$this->addBehavior('Timestamp');
@@ -92,12 +98,12 @@ class QueuedJobsTable extends Table {
 	}
 
 	/**
-	 * @param \Cake\Event\Event $event
+	 * @param \Cake\Event\EventInterface $event
 	 * @param \ArrayObject $data
 	 * @param \ArrayObject $options
 	 * @return void
 	 */
-	public function beforeMarshal(Event $event, ArrayObject $data, ArrayObject $options) {
+	public function beforeMarshal(EventInterface $event, ArrayObject $data, ArrayObject $options) {
 		if (isset($data['data']) && $data['data'] === '') {
 			$data['data'] = null;
 		}
@@ -110,7 +116,7 @@ class QueuedJobsTable extends Table {
 		$searchManager = $this->behaviors()->Search->searchManager();
 		$searchManager
 			->value('job_type')
-			->like('search', ['field' => ['job_group', 'reference'], 'before' => true, 'after' => true])
+			->like('search', ['fields' => ['job_group', 'reference'], 'before' => true, 'after' => true])
 			->add('status', 'Search.Callback', [
 				'callback' => function (Query $query, array $args, $filter) {
 					$status = $args['status'];
@@ -126,10 +132,28 @@ class QueuedJobsTable extends Table {
 					}
 
 					throw new NotImplementedException('Invalid status type');
-				}
+				},
 			]);
 
 		return $searchManager;
+	}
+
+	/**
+	 * Default validation rules.
+	 *
+	 * @param \Cake\Validation\Validator $validator Validator instance.
+	 * @return \Cake\Validation\Validator
+	 */
+	public function validationDefault(Validator $validator): Validator {
+		$validator
+			->integer('id')
+			->allowEmptyString('id', null, 'create');
+
+		$validator
+			->requirePresence('job_type', 'create')
+			->notEmptyString('job_type');
+
+		return $validator;
 	}
 
 	/**
@@ -247,9 +271,7 @@ class QueuedJobsTable extends Table {
 						$fetchdelay = $query->func()->avg('EXTRACT(EPOCH FROM fetched) - CASE WHEN notbefore IS NULL then EXTRACT(EPOCH FROM created) ELSE EXTRACT(EPOCH FROM notbefore) END');
 						break;
 				}
-					/**
-						 * @var \Cake\ORM\Query
-						 */
+
 				return [
 					'job_type',
 					'num' => $query->func()->count('*'),
@@ -379,13 +401,13 @@ class QueuedJobsTable extends Table {
 				'OR' => [],
 			],
 			'fields' => [
-				'age' => $age
+				'age' => $age,
 			],
 			'order' => [
 				'priority' => 'ASC',
 				'age' => 'ASC',
 				'id' => 'ASC',
-			]
+			],
 		];
 
 		$costConstraints = [];
@@ -500,7 +522,9 @@ class QueuedJobsTable extends Table {
 			$key = $this->key();
 			$job = $this->patchEntity($job, [
 				'workerkey' => $key,
-				'fetched' => $now
+				'fetched' => $now,
+				'progress' => null,
+				'failure_message' => null,
 			]);
 
 			return $this->saveOrFail($job);
@@ -527,7 +551,7 @@ class QueuedJobsTable extends Table {
 		}
 
 		$values = [
-			'progress' => round($progress, 2)
+			'progress' => round($progress, 2),
 		];
 		if ($status !== null) {
 			$values['status'] = $status;
@@ -544,6 +568,7 @@ class QueuedJobsTable extends Table {
 	 */
 	public function markJobDone(QueuedJob $job) {
 		$fields = [
+			'progress' => 100,
 			'completed' => $this->getDateTime(),
 		];
 		$job = $this->patchEntity($job, $fields);
@@ -569,17 +594,18 @@ class QueuedJobsTable extends Table {
 	}
 
 	/**
-	 * Reset current jobs
+	 * Resets all failed and not yet completed jobs.
 	 *
 	 * @param int|null $id
+	 * @param bool $full Also currently running jobs.
 	 *
 	 * @return int Success
 	 */
-	public function reset($id = null) {
+	public function reset($id = null, $full = false) {
 		$fields = [
 			'completed' => null,
 			'fetched' => null,
-			'progress' => 0,
+			'progress' => null,
 			'failed' => 0,
 			'workerkey' => null,
 			'failure_message' => null,
@@ -589,6 +615,9 @@ class QueuedJobsTable extends Table {
 		];
 		if ($id) {
 			$conditions['id'] = $id;
+		}
+		if (!$full) {
+			$conditions['failed >'] = 0;
 		}
 
 		return $this->updateAll($fields, $conditions);
@@ -604,7 +633,7 @@ class QueuedJobsTable extends Table {
 		$fields = [
 			'completed' => null,
 			'fetched' => null,
-			'progress' => 0,
+			'progress' => null,
 			'failed' => 0,
 			'workerkey' => null,
 			'failure_message' => null,
@@ -801,7 +830,9 @@ class QueuedJobsTable extends Table {
 	 * @return void
 	 */
 	public function truncate() {
-		$sql = $this->getSchema()->truncateSql($this->_connection);
+		/** @var \Cake\Database\Schema\TableSchema $schema */
+		$schema = $this->getSchema();
+		$sql = $schema->truncateSql($this->_connection);
 		foreach ($sql as $snippet) {
 			$this->_connection->execute($snippet);
 		}
@@ -844,7 +875,7 @@ class QueuedJobsTable extends Table {
 			return;
 		}
 
-		$QueueProcesses = TableRegistry::get('Queue.QueueProcesses');
+		$QueueProcesses = TableRegistry::getTableLocator()->get('Queue.QueueProcesses');
 		/** @var \Queue\Model\Entity\QueueProcess $queuedProcess */
 		$queuedProcess = $QueueProcesses->find()->where(['pid' => $pid])->firstOrFail();
 		$queuedProcess->terminate = true;
@@ -873,7 +904,7 @@ class QueuedJobsTable extends Table {
 		}
 		sleep(1);
 
-		$QueueProcesses = TableRegistry::get('Queue.QueueProcesses');
+		$QueueProcesses = TableRegistry::getTableLocator()->get('Queue.QueueProcesses');
 		$QueueProcesses->deleteAll(['pid' => $pid]);
 	}
 

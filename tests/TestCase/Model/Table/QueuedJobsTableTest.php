@@ -25,13 +25,11 @@ class QueuedJobsTableTest extends TestCase {
 	protected $QueuedJobs;
 
 	/**
-	 * Fixtures
-	 *
 	 * @var array
 	 */
-	public $fixtures = [
-		'plugin.queue.QueuedJobs',
-		'plugin.queue.QueueProcesses',
+	protected $fixtures = [
+		'plugin.Queue.QueuedJobs',
+		'plugin.Queue.QueueProcesses',
 	];
 
 	/**
@@ -39,11 +37,11 @@ class QueuedJobsTableTest extends TestCase {
 	 *
 	 * @return void
 	 */
-	public function setUp() {
+	public function setUp(): void {
 		parent::setUp();
 
 		$config = TableRegistry::exists('QueuedJobs') ? [] : ['className' => QueuedJobsTable::class];
-		$this->QueuedJobs = TableRegistry::get('QueuedJobs', $config);
+		$this->QueuedJobs = TableRegistry::getTableLocator()->get('QueuedJobs', $config);
 	}
 
 	/**
@@ -410,7 +408,7 @@ class QueuedJobsTableTest extends TestCase {
 		];
 
 		$data = [
-			'key' => '1'
+			'key' => '1',
 		];
 		$this->assertTrue((bool)$this->QueuedJobs->createJob('task1', $data));
 
@@ -605,7 +603,7 @@ class QueuedJobsTableTest extends TestCase {
 	 */
 	public function testEndProcess() {
 		/** @var \Queue\Model\Table\QueueProcessesTable $queuedProcessesTable */
-		$queuedProcessesTable = TableRegistry::get('Queue.QueueProcesses');
+		$queuedProcessesTable = TableRegistry::getTableLocator()->get('Queue.QueueProcesses');
 
 		$queuedProcess = $queuedProcessesTable->newEntity([
 			'pid' => 1,

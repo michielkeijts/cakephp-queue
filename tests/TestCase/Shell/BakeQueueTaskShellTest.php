@@ -5,34 +5,32 @@ namespace Queue\Test\TestCase\Shell;
 use Cake\Console\ConsoleIo;
 use Cake\TestSuite\TestCase;
 use Queue\Shell\BakeQueueTaskShell;
-use Tools\TestSuite\ConsoleOutput;
-use Tools\TestSuite\ToolsTestTrait;
+use Shim\TestSuite\ConsoleOutput;
+use Shim\TestSuite\TestTrait;
 
 class BakeQueueTaskShellTest extends TestCase {
 
-	use ToolsTestTrait;
+	use TestTrait;
 
 	/**
-	 * @var \Queue\Shell\BakeQueueTaskShell|\PHPUnit_Framework_MockObject_MockObject
+	 * @var \Queue\Shell\BakeQueueTaskShell|\PHPUnit\Framework\MockObject\MockObject
 	 */
-	public $shell;
+	protected $shell;
 
 	/**
-	 * @var \Tools\TestSuite\ConsoleOutput
+	 * @var \Shim\TestSuite\ConsoleOutput
 	 */
-	public $out;
+	protected $out;
 
 	/**
-	 * @var \Tools\TestSuite\ConsoleOutput
+	 * @var \Shim\TestSuite\ConsoleOutput
 	 */
-	public $err;
+	protected $err;
 
 	/**
-	 * Fixtures to load
-	 *
 	 * @var array
 	 */
-	public $fixtures = [
+	protected $fixtures = [
 		'plugin.Queue.QueuedJobs',
 		'plugin.Queue.QueueProcesses',
 	];
@@ -42,7 +40,7 @@ class BakeQueueTaskShellTest extends TestCase {
 	 *
 	 * @return void
 	 */
-	public function setUp() {
+	public function setUp(): void {
 		parent::setUp();
 
 		$this->out = new ConsoleOutput();
@@ -60,8 +58,8 @@ class BakeQueueTaskShellTest extends TestCase {
 		$this->shell->runCommand(['generate', 'FooBar', '-d']);
 
 		$output = $this->out->output();
-		$this->assertContains('Generating: QueueFooBarTask', $output);
-		$this->assertContains('Generating: QueueFooBarTask test class', $output);
+		$this->assertStringContainsString('Generating: QueueFooBarTask', $output);
+		$this->assertStringContainsString('Generating: QueueFooBarTask test class', $output);
 	}
 
 }

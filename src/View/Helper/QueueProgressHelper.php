@@ -1,4 +1,5 @@
 <?php
+
 namespace Queue\View\Helper;
 
 use Cake\Cache\Cache;
@@ -176,10 +177,13 @@ class QueueProgressHelper extends Helper {
 		if (!$stats) {
 			return null;
 		}
+		$sum = array_sum($stats);
+		if ($sum <= 0) {
+			return null;
+		}
+		$average = $sum / count($stats);
 
-		$average = array_sum($stats) / count($stats);
 		$running = $fetched->diffInSeconds();
-
 		$progress = min($running / $average, 0.9999);
 
 		return (float)$progress;

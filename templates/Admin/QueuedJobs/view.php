@@ -18,7 +18,7 @@
 	</ul>
 </nav>
 <div class="content action-view view large-9 medium-8 columns col-sm-8 col-xs-12">
-	<h1><?= h($queuedJob->id) ?></h1>
+	<h1>ID <?= h($queuedJob->id) ?></h1>
 	<table class="table vertical-table">
 		<tr>
 			<th><?= __d('queue', 'Job Type') ?></th>
@@ -26,11 +26,11 @@
 		</tr>
 		<tr>
 			<th><?= __d('queue', 'Job Group') ?></th>
-			<td><?= h($queuedJob->job_group) ?></td>
+			<td><?= h($queuedJob->job_group) ?: '---' ?></td>
 		</tr>
 		<tr>
 			<th><?= __d('queue', 'Reference') ?></th>
-			<td><?= h($queuedJob->reference) ?></td>
+			<td><?= h($queuedJob->reference) ?: '---' ?></td>
 		</tr>
 		<tr>
 			<th><?= __d('queue', 'Created') ?></th>
@@ -63,7 +63,7 @@
 		<tr>
 			<th><?= __d('queue', 'Completed') ?></th>
 			<td>
-				<?= $this->Time->nice($queuedJob->completed) ?>
+				<?= $this->Format->ok($this->Time->nice($queuedJob->completed), (bool)$queuedJob->completed) ?>
 				<?php if ($queuedJob->completed) {
 					echo '<div><small>';
 					echo __d('queue', 'Duration') . ': ' . $this->Time->duration($queuedJob->completed->diff($queuedJob->fetched));
@@ -78,25 +78,29 @@
 		<tr>
 			<th><?= __d('queue', 'Progress') ?></th>
 			<td>
-				<?php if (!$queuedJob->failed) { ?>
-					<?php echo $this->QueueProgress->progress($queuedJob) ?>
-					<br>
-					<?php
-						$textProgressBar = $this->QueueProgress->progressBar($queuedJob, 18);
-						echo $this->QueueProgress->htmlProgressBar($queuedJob, $textProgressBar);
-					?>
-				<?php } else { ?>
-					<i><?= __d('queue', 'Aborted') ?></i>
+				<?php if (!$queuedJob->completed && $queuedJob->fetched) { ?>
+					<?php if (!$queuedJob->failed || !$queuedJob->failure_message) { ?>
+						<?php echo $this->QueueProgress->progress($queuedJob) ?>
+						<br>
+						<?php
+							$textProgressBar = $this->QueueProgress->progressBar($queuedJob, 18);
+							echo $this->QueueProgress->htmlProgressBar($queuedJob, $textProgressBar);
+						?>
+					<?php } else { ?>
+						<i><?php echo $this->Queue->failureStatus($queuedJob); ?></i>
+					<?php } ?>
 				<?php } ?>
 			</td>
 		</tr>
 		<tr>
 			<th><?= __d('queue', 'Failed') ?></th>
 			<td>
-				<?= $queuedJob->failed ? $this->Format->ok($this->Number->format($queuedJob->failed) . 'x', !$queuedJob->failed)  : '' ?>
+				<?= $queuedJob->failed ? $this->Format->ok($this->Queue->fails($queuedJob), !$queuedJob->failed)  : '' ?>
 				<?php
-				if ($queuedJob->fetched && $queuedJob->failed) {
+				if ($this->Queue->hasFailed($queuedJob)) {
 					echo ' ' . $this->Form->postLink(__d('queue', 'Soft reset'), ['controller' => 'Queue', 'action' => 'resetJob', $queuedJob->id], ['confirm' => 'Sure?', 'class' => 'button button-primary btn margin btn-primary']);
+				} elseif (!$queuedJob->completed && $queuedJob->fetched && $queuedJob->failed && $queuedJob->failure_message) {
+					echo ' ' . $this->Form->postLink(__d('queue', 'Force reset'), ['controller' => 'Queue', 'action' => 'resetJob', $queuedJob->id], ['confirm' => 'Sure? This job is currently waiting to be re-queued.', 'class' => 'button button-primary btn margin btn-primary']);
 				}
 				?>
 			</td>
@@ -117,7 +121,7 @@
 	</table>
 	<div class="row">
 		<h3><?= __d('queue', 'Data') ?></h3>
-		<?= $this->Text->autoParagraph(h($queuedJob->data)); ?>
+		<?= $queuedJob->data ? $this->Text->autoParagraph(h($queuedJob->data)) : ''; ?>
 		<?php
 			if ($queuedJob->data && $this->Configure->read('debug')) {
 				$data = unserialize($queuedJob->data);
@@ -128,7 +132,7 @@
 	</div>
 	<div class="row">
 		<h3><?= __d('queue', 'Failure Message') ?></h3>
-		<?= $this->Text->autoParagraph(h($queuedJob->failure_message)); ?>
+		<?= $queuedJob->failure_message ? $this->Text->autoParagraph(h($queuedJob->failure_message)) : ''; ?>
 	</div>
 
 </div>
