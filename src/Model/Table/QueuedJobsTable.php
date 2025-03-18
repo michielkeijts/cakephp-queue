@@ -220,8 +220,6 @@ class QueuedJobsTable extends Table {
 		$queuedJob = [
 			'job_task' => $this->jobTask($jobTask),
 			'data' => $data,
-			'job_group' => !empty($config['group']) ? $config['group'] : null,
-			'notbefore' => !empty($config['notBefore']) ? $this->getDateTime($config['notBefore']) : null,
 		] + $config;
 
 		$queuedJob = $this->newEntity($queuedJob);
