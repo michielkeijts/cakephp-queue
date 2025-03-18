@@ -175,7 +175,8 @@ class Processor {
 			if ($this->exit || mt_rand(0, 100) > 100 - (int)Config::gcprob()) {
 				$this->io->out('Performing Old job cleanup.');
 				$this->QueuedJobs->cleanOldJobs();
-				$this->QueueProcesses->cleanEndedProcesses();
+				$this->QueuedJobs->cleanFailedJobs();
+				$this->QueueProcesses->clearProcesses();
 			}
 			$this->io->hr();
 		}
