@@ -166,18 +166,18 @@ class EmailTask extends Task implements AddInterface, AddFromBackendInterface {
 		foreach ($settings as $method => $setting) {
 			$setter = 'set' . ucfirst($method);
 			if (in_array($method, ['theme', 'template', 'layout'], true)) {
-				call_user_func_array([$this->mailer->viewBuilder(), $setter], (array)$setting);
+				call_user_func_array([$this->mailer->viewBuilder(), $setter], [$setting]);
 
 				continue;
 			}
 			if (in_array($method, ['helper', 'helpers'], true)) {
 				$setter = 'add' . ucfirst($method);
-				call_user_func_array([$this->mailer->viewBuilder(), $setter], (array)$setting);
+				call_user_func_array([$this->mailer->viewBuilder(), $setter], [$setting]);
 
 				continue;
 			}
 
-			call_user_func_array([$this->mailer, $setter], (array)$setting);
+			call_user_func_array([$this->mailer, $setter], [$setting]);
 		}
 
 		$this->mailer->setTransport($data['transport'] ?? 'default');
