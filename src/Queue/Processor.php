@@ -20,7 +20,7 @@ use Queue\Model\Table\QueueProcessesTable;
 use RuntimeException;
 use Throwable;
 
-declare(ticks=1);
+declare(ticks = 1);
 
 /**
  * Main shell to init and run queue workers.
@@ -98,7 +98,7 @@ class Processor {
 		$config = $this->getConfig($args);
 
 		try {
-			$pid = $this->initPid();
+			$pid = $this->initPid(implode(' ', $_SERVER['argv']));
 		} catch (PersistenceFailedException $exception) {
 			$this->io->err($exception->getMessage());
 			$limit = (int)Configure::read('Queue.maxworkers');
@@ -206,6 +206,9 @@ class Processor {
 
 			$data = $queuedJob->data;
 			$task = $this->loadTask($taskName);
+
+            $this->QueueProcesses->update($pid, $queuedJob->id);
+
 			$traits = class_uses($task);
 			if ($this->container && $traits && in_array(ServicesTrait::class, $traits, true)) {
 				/** @phpstan-ignore-next-line */
@@ -222,6 +225,8 @@ class Processor {
 
 			$this->logError($taskName . ' (job ' . $queuedJob->id . ')' . "\n" . $failureMessage, $pid);
 		}
+
+		$this->QueueProcesses->update($pid, NULL);
 
 		if ($return === false) {
 			$this->QueuedJobs->markJobFailed($queuedJob, $failureMessage);
@@ -323,12 +328,15 @@ class Processor {
 	}
 
 	/**
+     * Adds process to table and saves arguments
+     * @param string $arguments
+     *
 	 * @return string
 	 */
-	protected function initPid(): string {
+	protected function initPid(string $arguments = NULL): string {
 		$pid = $this->retrievePid();
 		$key = $this->QueuedJobs->key();
-		$this->QueueProcesses->add($pid, $key);
+		$this->QueueProcesses->add($pid, $key, $arguments);
 
 		$this->pid = $pid;
 
@@ -349,12 +357,13 @@ class Processor {
 	}
 
 	/**
+     * Touches process $pid and saves current $jobId
 	 * @param string $pid
-	 *
+	 * @param int $jobId
 	 * @return void
 	 */
-	protected function updatePid(string $pid): void {
-		$this->QueueProcesses->update($pid);
+	protected function updatePid(string $pid, int $jobId = NULL): void {
+		$this->QueueProcesses->update($pid, $jobId);
 	}
 
 	/**

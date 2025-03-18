@@ -20,6 +20,7 @@ use Queue\Queue\Config;
 use Queue\Queue\TaskFinder;
 use RuntimeException;
 use Search\Manager;
+use Cake\Database\Schema\TableSchemaInterface;
 
 /**
  * @author MGriesbach@gmail.com
@@ -126,6 +127,16 @@ class QueuedJobsTable extends Table {
 		]);
 
 		$this->getSchema()->setColumnType('data', 'json');
+	}
+
+	/**
+	 * @return \Cake\Database\Schema\TableSchemaInterface
+	 */
+	public function getSchema(): TableSchemaInterface {
+		$schema = parent::getSchema();
+		$schema->setColumnType('data', 'json');
+
+		return $schema;
 	}
 
 	/**
@@ -247,13 +258,28 @@ class QueuedJobsTable extends Table {
 			'notbefore' => $config->hasNotBefore() ? $this->getDateTime($config->getNotBeforeOrFail()) : null,
 			'priority' => $config->getPriority(),
 		] + $config->toArray();
+
 		if ($queuedJob['priority'] === null) {
 			unset($queuedJob['priority']);
 		}
-
+		
 		$queuedJob = $this->newEntity($queuedJob);
 
 		return $this->saveOrFail($queuedJob);
+	}
+
+	/**
+	 * @param SelectQuery $query
+	 * @return SelectQuery
+	 */
+	public function findBroken(SelectQuery $query)
+	{
+		$workerkeys = $this->WorkerProcesses->subquery()->select(['workerkey']);
+		return $query->where([
+			'fetched IS NOT' => NULL,
+			'completed IS' => NULL,
+			'workerkey NOT IN' => $workerkeys
+		]);
 	}
 
 	/**
@@ -738,6 +764,7 @@ class QueuedJobsTable extends Table {
 	public function markJobDone(QueuedJob $job): bool {
 		$fields = [
 			'progress' => 1,
+			'failed' => NULL,
 			'completed' => $this->getDateTime(),
 		];
 		$job = $this->patchEntity($job, $fields);
@@ -756,10 +783,33 @@ class QueuedJobsTable extends Table {
 	public function markJobFailed(QueuedJob $job, ?string $failureMessage = null): bool {
 		$fields = [
 			'failure_message' => $failureMessage,
+			'failed' => $this->getDateTime(),
 		];
 		$job = $this->patchEntity($job, $fields);
 
 		return (bool)$this->save($job);
+	}
+
+	/**
+	 * Resets all the jobs which have become orphan: the parent process is killed/stopped,
+	 * but workerkey still present
+	 *
+	 * Resets all which are not completed
+	 * @return int
+	 */
+	public function resetOrphanedJobs(): int {
+		$subquery = $this->WorkerProcesses->findActive()->select(['workerkey']);
+
+		$jobs = $this->find()->where([
+			'workerkey IS NOT' => NULL,
+			'workerkey NOT IN' => $subquery
+		]);
+
+		foreach ($jobs as $job) {
+			$this->reset($job->id, TRUE);
+		}
+
+		return $jobs->count();
 	}
 
 	/**

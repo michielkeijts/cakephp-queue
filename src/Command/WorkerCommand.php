@@ -35,7 +35,7 @@ class WorkerCommand extends Command {
 	 * @inheritDoc
 	 */
 	public static function defaultName(): string {
-		return 'queue job';
+		return 'queue worker';
 	}
 
 	/**
@@ -45,7 +45,7 @@ class WorkerCommand extends Command {
 		$parser = parent::getOptionParser();
 
 		$parser->addArgument('action', [
-			'help' => 'Action (end, kill)',
+			'help' => 'Action (end, kill, maintenance)',
 			'required' => false,
 		]);
 		$parser->addArgument('pid', [
@@ -94,14 +94,14 @@ class WorkerCommand extends Command {
 			return static::CODE_ERROR;
 		}
 
-		if (!in_array($action, ['end', 'kill', 'clean'], true)) {
+		if (!in_array($action, ['end', 'kill', 'clean', 'clear'], true)) {
 			$io->abort('No such action');
 		}
 		$pid = $args->getArgument('pid');
-		if (!$pid && $action !== 'clean') {
+		if (!$pid && $action !== 'clean' && $action !== 'clear') {
 			$io->abort('PID must be given, or "all" used for all.');
 		}
-		if ($action === 'clean' && $pid) {
+		if (($action === 'clean' || $action === 'clear') && $pid) {
 			$io->abort('Clean action does not have a 2nd argument.');
 		}
 
@@ -195,6 +195,25 @@ class WorkerCommand extends Command {
 
 		$io->out('Deleting old/outdated processes, that have finished before ' . $thresholdTime);
 		$result = $this->QueueProcesses->cleanEndedProcesses();
+		$io->success('Deleted: ' . $result);
+
+		return static::CODE_SUCCESS;
+	}
+
+	/**
+	 * @param \Cake\Console\ConsoleIo $io
+	 *
+	 * @return int
+	 */
+	protected function clear(ConsoleIo $io): int {
+		$timeout = Config::defaultworkertimeout();
+		if (!$timeout) {
+			$io->abort('You disabled `defaultworkertimeout` in config. Aborting.');
+		}
+		$thresholdTime = (new DateTime())->subSeconds($timeout);
+
+		$io->out('Deleting processes without a PID or that have finished before ' . $thresholdTime);
+		$result = $this->QueueProcesses->clearProcesses();
 		$io->success('Deleted: ' . $result);
 
 		return static::CODE_SUCCESS;
