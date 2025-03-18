@@ -112,9 +112,10 @@ class QueuedJobsController extends AppController {
 	 * @return \Cake\Http\Response|null|void
 	 */
 	public function view(?int $id = null) {
-		$queuedJob = $this->QueuedJobs->get((int)$id, [
-			'contain' => ['WorkerProcesses'],
-		]);
+		$queuedJob = $this->QueuedJobs->get(
+			(int)$id,
+			contain: ['WorkerProcesses'],
+		);
 
 		if ($this->request->getParam('_ext') && $this->request->getParam('_ext') === 'json' && $this->request->getQuery('download')) {
 			$this->response = $this->response->withDownload('queued-job-' . $id . '.json');
@@ -201,9 +202,7 @@ class QueuedJobsController extends AppController {
 	 * @return \Cake\Http\Response|null|void Redirects on successful edit, renders view otherwise.
 	 */
 	public function edit(?int $id = null) {
-		$queuedJob = $this->QueuedJobs->get($id, [
-			'contain' => [],
-		]);
+		$queuedJob = $this->QueuedJobs->get($id);
 		if ($queuedJob->completed) {
 			$this->Flash->error(__d('queue', 'The queued job is already completed.'));
 
@@ -230,7 +229,27 @@ class QueuedJobsController extends AppController {
 	 * @return \Cake\Http\Response|null|void Redirects on successful edit, renders view otherwise.
 	 */
 	public function data(?int $id = null) {
-		return $this->edit($id);
+		$this->QueuedJobs->addBehavior('Queue.Jsonable', ['input' => 'json', 'fields' => ['data'], 'map' => ['data_string']]);
+
+		$queuedJob = $this->QueuedJobs->get($id);
+		if ($queuedJob->completed) {
+			$this->Flash->error(__d('queue', 'The queued job is already completed.'));
+
+			return $this->redirect(['action' => 'view', $id]);
+		}
+
+		if ($this->request->is(['patch', 'post', 'put'])) {
+			$queuedJob = $this->QueuedJobs->patchEntity($queuedJob, $this->request->getData());
+			if ($this->QueuedJobs->save($queuedJob)) {
+				$this->Flash->success(__d('queue', 'The queued job has been saved.'));
+
+				return $this->redirect(['action' => 'view', $id]);
+			}
+
+			$this->Flash->error(__d('queue', 'The queued job could not be saved. Please try again.'));
+		}
+
+		$this->set(compact('queuedJob'));
 	}
 
 	/**
@@ -299,10 +318,10 @@ class QueuedJobsController extends AppController {
 		$allTasks = $taskFinder->all();
 		$tasks = [];
 		foreach ($allTasks as $task => $className) {
-			if (substr($task, 0, 6) !== 'Queue.') {
+			if (!str_starts_with($task, 'Queue.')) {
 				continue;
 			}
-			if (substr($task, -7) !== 'Example') {
+			if (!str_ends_with($task, 'Example')) {
 				continue;
 			}
 
@@ -350,7 +369,7 @@ class QueuedJobsController extends AppController {
 
 		$tasks = [];
 		foreach ($allTasks as $task => $className) {
-			if (strpos($task, 'Queue.') !== 0) {
+			if (!str_starts_with($task, 'Queue.')) {
 				continue;
 			}
 

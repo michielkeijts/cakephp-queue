@@ -4,6 +4,7 @@
  * @var iterable<\Queue\Model\Entity\QueuedJob> $queuedJobs
  */
 
+use Brick\VarExporter\VarExporter;
 use Cake\Core\Configure;
 use Cake\Core\Plugin;
 
@@ -54,11 +55,16 @@ use Cake\Core\Plugin;
 			<?php foreach ($queuedJobs as $queuedJob): ?>
 			<tr>
 				<td><?= h($queuedJob->job_task) ?></td>
-				<td><?= h($queuedJob->job_group) ?: '---'  ?></td>
+				<td><?= h($queuedJob->job_group) ?: '---' ?></td>
 				<td>
 					<?= h($queuedJob->reference) ?: '---' ?>
 					<?php if ($queuedJob->data) {
-						echo $this->Icon->render('cubes', ['title' => $this->Text->truncate($queuedJob->data, 1000)]);
+						$data = $queuedJob->data;
+						if ($data && !is_array($data)) {
+							$data = json_decode($queuedJob->data, true);
+						}
+						$data = VarExporter::export($data, VarExporter::TRAILING_COMMA_IN_ARRAY);
+						echo $this->Icon->render('cubes', [], ['title' => $this->Text->truncate($data, 1000)]);
 					}
 					?>
 				</td>
@@ -96,7 +102,7 @@ use Cake\Core\Plugin;
                     </div>
                     <?php } ?>
                 </td>
-				<td><?= $this->Format->ok($this->Queue->attempts($queuedJob), $queuedJob->completed || $queuedJob->attempts < 1); ?></td>
+				<td><?= $this->element('Queue.ok', ['value' => $this->Queue->attempts($queuedJob), 'ok' => $queuedJob->completed || $queuedJob->attempts < 1]); ?></td>
 				<td>
 					<?= h($queuedJob->status) ?>
 					<?php if (!$queuedJob->completed && $queuedJob->fetched) { ?>

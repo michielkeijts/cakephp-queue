@@ -5,7 +5,6 @@
  */
 
 use Brick\VarExporter\VarExporter;
-use Queue\Utility\Serializer;
 
 ?>
 <nav class="actions large-3 medium-4 columns col-sm-4 col-12" id="actions-sidebar">
@@ -99,7 +98,7 @@ use Queue\Utility\Serializer;
 		<tr>
 			<th><?= __d('queue', 'Attempts') ?></th>
 			<td>
-				<?= $queuedJob->attempts ? $this->Format->ok($this->Queue->attempts($queuedJob), $queuedJob->completed || $queuedJob->attempts < 1) : '' ?>
+				<?= $queuedJob->attempts ? $this->element('Queue.ok', ['value' => $this->Queue->attempts($queuedJob), 'ok' => $queuedJob->completed || $queuedJob->attempts < 1]) : '' ?>
 				<?php
 				if ($this->Queue->hasFailed($queuedJob)) {
 					echo ' ' . $this->Form->postLink(__d('queue', 'Soft reset'), ['controller' => 'Queue', 'action' => 'resetJob', $queuedJob->id], ['confirm' => 'Sure?', 'class' => 'button button-primary btn margin btn-primary']);
@@ -126,15 +125,14 @@ use Queue\Utility\Serializer;
 	<div class="row">
 		<div class="col-md-12">
 		<h3><?= __d('queue', 'Data') ?></h3>
-		<p>
-		<?= $queuedJob->data ? $this->Text->autoParagraph(h($queuedJob->data)) : ''; ?>
-		</p>
 		<?php
-			if ($queuedJob->data) {
-				$data = Serializer::deserialize($queuedJob->data);
-				echo '<h4>Unserialized content</h4>';
-				echo '<pre>' . h(VarExporter::export($data, VarExporter::TRAILING_COMMA_IN_ARRAY)) . '</pre>';
+		if ($queuedJob->data) {
+			$data = $queuedJob->data;
+			if ($data && !is_array($data)) {
+				$data = json_decode($queuedJob->data, true);
 			}
+			echo '<pre>' . h(VarExporter::export($data, VarExporter::TRAILING_COMMA_IN_ARRAY)) . '</pre>';
+		}
 		?>
 		</div>
 	</div>

@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        php-version: ['8.1', '8.3']
+        php-version: ['8.1', '8.4']
         db-type: ['sqlite', 'mysql', 'pgsql']
         prefer-lowest: ['']
         include:
@@ -28,7 +28,7 @@ jobs:
           POSTGRES_PASSWORD: postgres
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup Service
         if: matrix.db-type == 'mysql'
@@ -59,10 +59,10 @@ jobs:
           if ${{ matrix.prefer-lowest == 'prefer-lowest' }}
           then
             composer update --prefer-lowest --prefer-stable
+            composer require --dev dereuromark/composer-prefer-lowest:dev-master
           else
             composer install --no-progress --prefer-dist --optimize-autoloader
           fi
-          if ${{ matrix.prefer-lowest == 'prefer-lowest' }}; then composer lowest-setup; fi
 
       - name: Setup problem matchers for PHPUnit
         if: matrix.db-type == 'mysql'
@@ -84,18 +84,21 @@ jobs:
           fi
 
       - name: Validate prefer-lowest
-        run: if ${{ matrix.prefer-lowest == 'prefer-lowest' }}; then vendor/bin/validate-prefer-lowest -m; fi
+        if: matrix.prefer-lowest == 'prefer-lowest'
+        run: vendor/bin/validate-prefer-lowest -m
 
-      - name: Code Coverage Report
+      - name: Upload coverage reports to Codecov
         if: success() && matrix.php-version == '8.1'
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   validation:
     name: Coding Standard & Static Analysis
     runs-on: ubuntu-22.04
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
