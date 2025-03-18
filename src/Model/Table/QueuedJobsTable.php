@@ -262,7 +262,7 @@ class QueuedJobsTable extends Table {
 		if ($queuedJob['priority'] === null) {
 			unset($queuedJob['priority']);
 		}
-		
+
 		$queuedJob = $this->newEntity($queuedJob);
 
 		return $this->saveOrFail($queuedJob);
@@ -977,6 +977,21 @@ class QueuedJobsTable extends Table {
 	 * @return int
 	 */
 	public function cleanOldJobs(): int {
+		if (!Configure::read('Queue.cleanuptimeout')) {
+			return 0;
+		}
+
+		return $this->deleteAll([
+			'completed <' => time() - (int)Configure::read('Queue.cleanuptimeout'),
+		]);
+	}
+
+	/**
+	 * Cleanup/Delete Completed Jobs.
+	 *
+	 * @return int
+	 */
+	public function cleanFailedJobs(): int {
 		if (!Configure::read('Queue.cleanuptimeout')) {
 			return 0;
 		}
