@@ -706,7 +706,7 @@ class QueuedJobsTable extends Table {
 			switch ($driverName) {
 				case static::DRIVER_MYSQL:
 				case static::DRIVER_POSTGRES:
-					$query->epilog('FOR UPDATE');
+					$query->epilog('FOR UPDATE SKIP LOCKED');
 
 					break;
 				case static::DRIVER_SQLSERVER:
