@@ -344,9 +344,14 @@ class QueueProcessesTable extends Table {
 	 *
 	 * @return void
 	 */
-	public function terminateProcess(string $pid, int $sig = SIGTERM): void {
+	public function terminateProcess(string $pid, int $sig = 0): void {
 		if (!$pid) {
 			return;
+		}
+
+		// In the Windows operating system the SIGTERM constant is not defined
+		if (!$sig && defined('SIGTERM')) {
+			$sig = \SIGTERM;
 		}
 
 		$killed = false;
