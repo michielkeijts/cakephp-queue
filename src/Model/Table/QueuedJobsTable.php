@@ -596,9 +596,18 @@ class QueuedJobsTable extends Table {
 			$uniqueConstraints[$name] = $name;
 		}
 
+		$concurrentCostraints = [];
+		foreach ($tasks as $name => $task) {
+			if (!$task['concurrent']) {
+				continue;
+			}
+
+			$concurrentCostraints[$name] = $task['concurrent'];
+		}
+
 		/** @var array<\Queue\Model\Entity\QueuedJob> $runningJobs */
 		$runningJobs = [];
-		if ($costConstraints || $uniqueConstraints) {
+		if ($costConstraints || $uniqueConstraints || $concurrentCostraints) {
 			$constraintJobs = array_keys($costConstraints + $uniqueConstraints);
 			$runningJobs = $this->find('queued')
 				->contain(['WorkerProcesses'])
@@ -610,9 +619,16 @@ class QueuedJobsTable extends Table {
 		$costs = 0;
 		$server = $this->WorkerProcesses->buildServerString();
 		foreach ($runningJobs as $runningJob) {
+			if (isset($concurrentCostraints[$runningJob->job_task])) {
+				$concurrentCostraints[$runningJob->job_task]--;
+
+				if ($concurrentCostraints[$runningJob->job_task]==0) {
+					$types[] = '-' . $runningJob->job_task;
+				}
+			}
+
 			if (isset($uniqueConstraints[$runningJob->job_task])) {
 				$types[] = '-' . $runningJob->job_task;
-
 				continue;
 			}
 
