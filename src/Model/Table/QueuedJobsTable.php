@@ -699,14 +699,16 @@ class QueuedJobsTable extends Table {
 			$options['conditions']['OR'][] = $tmp;
 		}
 
+		$job = $this->requestUniqueJob($this->find('all', ...$options), $now);
+
 		/** @var \Queue\Model\Entity\QueuedJob|null $job */
-		$job = $this->getConnection()->transactional(function () use ($query, $options, $now, $driverName) {
+		/*$job = $this->getConnection()->transactional(function () use ($query, $options, $now, $driverName) {
 			$query->find('all', ...$options)->enableAutoFields(true);
 
 			switch ($driverName) {
 				case static::DRIVER_MYSQL:
 				case static::DRIVER_POSTGRES:
-					$query->epilog('FOR UPDATE SKIP LOCKED');
+					$query->epilog('FOR UPDATE');
 
 					break;
 				case static::DRIVER_SQLSERVER:
@@ -721,7 +723,7 @@ class QueuedJobsTable extends Table {
 			}
 
 			/** @var \Queue\Model\Entity\QueuedJob|null $job */
-			$job = $query->first();
+			/*$job = $query->first();
 
 			if (!$job) {
 				return null;
@@ -737,7 +739,7 @@ class QueuedJobsTable extends Table {
 			]);
 
 			return $this->saveOrFail($job);
-		});
+		});*/
 
 		if (!$job) {
 			return null;
@@ -746,6 +748,53 @@ class QueuedJobsTable extends Table {
 		$this->rateHistory[$job->job_task] = $now->toUnixString();
 
 		return $job;
+	}
+
+	/**
+	 * Get the Job by filering on a unique constraind
+	 * @param SelectQuery $query
+	 * @return QueuedJob|null
+	 */
+	public function requestUniqueJob(SelectQuery $query, $now): ?QueuedJob
+	{
+		$key = $this->key();
+
+		$sql = $query->sql();
+
+		$wherePart = substr($sql, strpos($sql, 'WHERE'));
+		$start = strpos($sql, '(');
+		$agePart = substr($sql, $start, strpos($sql, ' AS age') - $start);
+
+		$wherePart = str_replace("age", $agePart, $wherePart);
+
+		$query->getValueBinder()->bind(':wk', $key, 'string');
+		$query->getValueBinder()->bind(':ft', $now->toDateTimeString(), 'string');
+
+		$data = [
+			'workerkey = :wk',
+			'fetched = :ft',
+			'progress = null',
+			'failure_message = null',
+			'attempts = attempts + 1',
+		];
+
+		$updateSql = "UPDATE ".$this->getTable(). " SET ".implode(', ', $data)." $wherePart LIMIT 1";
+
+		$params = [];
+		$types = [];
+		foreach ($query->getValueBinder()->bindings() as $binding) {
+			$params[$binding['placeholder']] = $binding['value'];
+			$types[] = $binding['type'];
+		}
+
+		if ($this->getConnection()->execute($updateSql, $params, $types)->rowCount() == 0) {
+			return null;
+		}
+
+		return $this->find()->where([
+			'workerkey' => $key,
+			'fetched' => $now,
+		])->orderByDesc('fetched')->limit(1)->first();
 	}
 
 	/**
