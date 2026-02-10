@@ -768,7 +768,7 @@ class QueuedJobsTable extends Table {
 		$wherePart = str_replace("age", $agePart, $wherePart);
 
 		$query->getValueBinder()->bind(':wk', $key, 'string');
-		$query->getValueBinder()->bind(':ft', $now->toDateTimeString(), 'string');
+		$query->getValueBinder()->bind(':ft', $now->toDateTimeString(), 'datetime');
 
 		$data = [
 			'workerkey = :wk',
