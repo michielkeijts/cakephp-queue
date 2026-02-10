@@ -796,6 +796,10 @@ class QueuedJobsTable extends Table {
 			return null;
 		}
 
+		// add extra sleep fordecreasing possibility of running jobs at same time. 
+		$sec = rand(5e5,15e5);
+		usleep($sec);
+
 		return $this->find()->where([
 			'workerkey' => $key,
 			'fetched' => $now,
