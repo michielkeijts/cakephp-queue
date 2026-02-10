@@ -8,6 +8,7 @@ use Cake\Core\Configure;
 use Cake\Core\Plugin;
 use Cake\Event\EventInterface;
 use Cake\Http\Exception\NotImplementedException;
+use Cake\I18n\Date;
 use Cake\I18n\DateTime;
 use Cake\ORM\Query\SelectQuery;
 use Cake\ORM\Table;
@@ -783,7 +784,7 @@ class QueuedJobsTable extends Table {
 		$params = [];
 		$types = [];
 		foreach ($query->getValueBinder()->bindings() as $binding) {
-			if ($binding['type'] === 'datetime') {
+			if ($binding['value'] instanceof DateTime) {
 				$binding['value'] = $binding['value']->toDateTimeString();
 				$binding['type'] = 'string';
 			}
