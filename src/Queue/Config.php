@@ -155,6 +155,8 @@ class Config {
 			$config[$task]['rate'] = $taskConfig['rate'] ?? $taskObject->rate;
 			$config[$task]['costs'] = $taskConfig['costs'] ?? $taskObject->costs;
 			$config[$task]['unique'] = $taskConfig['unique'] ?? $taskObject->unique;
+			$config[$task]['concurrent'] = $taskConfig['concurrent'] ?? $taskObject->concurrent;
+			$config[$task]['group'] = $taskConfig['group'] ?? $taskObject->group;
 
 			unset($taskObject);
 		}

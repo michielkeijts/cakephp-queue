@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace Queue\Model\Table;
 
 use ArrayObject;
+use Cake\Collection\Collection;
 use Cake\Core\Configure;
 use Cake\Core\Plugin;
 use Cake\Event\Event;
@@ -21,6 +22,7 @@ use Queue\Model\Filter\QueuedJobsCollection;
 use Queue\Queue\Config;
 use Queue\Queue\TaskFinder;
 use Queue\Utility\Memory;
+use Cake\Database\Schema\TableSchemaInterface;
 
 /**
  * @author MGriesbach@gmail.com
@@ -219,12 +221,16 @@ class QueuedJobsTable extends Table {
 		$queuedJob = [
 			'job_task' => $this->jobTask($jobTask),
 			'data' => $data,
-			'notbefore' => $config->hasNotBefore() ? $this->getDateTime($config->getNotBeforeOrFail()) : null,
+			'notbefore' => $config->hasNotBefore() ? $this->getDateTime($config->getNotBeforeOrFail()) : NULL,
 			'priority' => $config->getPriority(),
 		] + $config->toArray();
 
 		if ($queuedJob['priority'] === null) {
 			unset($queuedJob['priority']);
+		}
+
+		if ($queuedJob['notbefore'] === null) {
+			unset($queuedJob['notbefore']);
 		}
 
 		$queuedJob = $this->newEntity($queuedJob);
@@ -505,32 +511,18 @@ class QueuedJobsTable extends Table {
 		$driverName = $this->getDriverName();
 
 		$query = $this->find();
-		$age = $query->expr()->add('IFNULL(TIMESTAMPDIFF(SECOND, "' . $nowStr . '", notbefore), 0)');
-		switch ($driverName) {
-			case static::DRIVER_SQLSERVER:
-				$age = $query->expr()->add('ISNULL(DATEDIFF(SECOND, GETDATE(), notbefore), 0)');
-
-				break;
-			case static::DRIVER_POSTGRES:
-				$age = $query->expr()
-					->add('COALESCE(EXTRACT(EPOCH FROM notbefore) - (EXTRACT(EPOCH FROM now())), 0)');
-
-				break;
-			case static::DRIVER_SQLITE:
-				$age = $query->expr()
-					->add('IFNULL(CAST(strftime("%s", notbefore) as integer) - CAST(strftime("%s", "' . $nowStr . '") as integer), 0)');
-
-				break;
-		}
 		$options = [
 			'conditions' => [
 				'completed IS' => null,
 				'OR' => [],
-			],
-			'fields' => [
-				'age' => $age,
-			],
+			]
 		];
+
+		if (!empty($groups)) {
+			$tasks = (new Collection($tasks))->filter(function ($task) use ($groups) {
+				return empty($task['group']) || in_array($task['group'], $groups);
+			})->toArray();
+		}
 
 		$costConstraints = [];
 		foreach ($tasks as $name => $task) {
@@ -616,10 +608,7 @@ class QueuedJobsTable extends Table {
 				'job_task' => $name,
 				'AND' => [
 					[
-						'OR' => [
-							'notbefore <' => $nowStr,
-							'notbefore IS' => null,
-						],
+						'notbefore <' => $nowStr,
 					],
 					[
 						'OR' => [
@@ -653,15 +642,16 @@ class QueuedJobsTable extends Table {
 			$options['conditions']['OR'][] = $tmp;
 		}
 
-		$job = $this->requestUniqueJob($this->find('all', ...$options), $now);
-
 		/** @var \Queue\Model\Entity\QueuedJob|null $job */
 		$job = $this->getConnection()->transactional(function () use ($query, $options, $now, $driverName) {
 			$query->find('all', ...$options)->enableAutoFields(true)
-				->orderBy(['priority' => 'ASC', 'age' => 'ASC', 'id' => 'ASC']);
+				->orderBy(['priority' => 'ASC', 'notbefore' => 'ASC', 'id' => 'ASC']);
 
 			switch ($driverName) {
 				case static::DRIVER_MYSQL:
+					$query->epilog('FOR UPDATE SKIP LOCKED');
+
+					break;
 				case static::DRIVER_POSTGRES:
 					$query->epilog('FOR UPDATE');
 
@@ -680,7 +670,7 @@ class QueuedJobsTable extends Table {
 			}
 
 			/** @var \Queue\Model\Entity\QueuedJob|null $job */
-			/*$job = $query->first();
+			$job = $query->first();
 
 			if (!$job) {
 				return null;
@@ -697,7 +687,7 @@ class QueuedJobsTable extends Table {
 			]);
 
 			return $this->saveOrFail($job);
-		});*/
+		});
 
 		if (!$job) {
 			return null;
@@ -707,62 +697,6 @@ class QueuedJobsTable extends Table {
 
 		return $job;
 	}
-
-	/**
-	 * Get the Job by filering on a unique constraind
-	 * @param SelectQuery $query
-	 * @return QueuedJob|null
-	 */
-	public function requestUniqueJob(SelectQuery $query, $now): ?QueuedJob
-	{
-		$key = $this->key();
-
-		$sql = $query->sql();
-
-		$wherePart = substr($sql, strpos($sql, 'WHERE'));
-		$start = strpos($sql, '(');
-		$agePart = substr($sql, $start, strpos($sql, ' AS age') - $start);
-
-		$wherePart = str_replace("age", $agePart, $wherePart);
-
-		$query->getValueBinder()->bind(':wk', $key, 'string');
-		$query->getValueBinder()->bind(':ft', $now->toDateTimeString(), 'datetime');
-
-		$data = [
-			'workerkey = :wk',
-			'fetched = :ft',
-			'progress = null',
-			'failure_message = null',
-			'attempts = attempts + 1',
-		];
-
-		$updateSql = "UPDATE ".$this->getTable(). " SET ".implode(', ', $data)." $wherePart LIMIT 1";
-
-		$params = [];
-		$types = [];
-		foreach ($query->getValueBinder()->bindings() as $binding) {
-			if ($binding['value'] instanceof DateTime) {
-				$binding['value'] = $binding['value']->toDateTimeString();
-				$binding['type'] = 'string';
-			}
-			$params[$binding['placeholder']] = $binding['value'];
-			$types[] = $binding['type'];
-		}
-
-		if ($this->getConnection()->execute($updateSql, $params, $types)->rowCount() == 0) {
-			return null;
-		}
-
-		// add extra sleep fordecreasing possibility of running jobs at same time.
-		$sec = rand(intval(5e5),intval(15e5));
-		usleep($sec);
-
-		return $this->find()->where([
-			'workerkey' => $key,
-			'fetched' => $now,
-		])->orderByDesc('fetched')->limit(1)->first();
-	}
-
 	/**
 	 * @param int $id ID of job
 	 * @param float $progress Value from 0 to 1

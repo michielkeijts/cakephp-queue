@@ -75,6 +75,15 @@ abstract class Task implements TaskInterface {
 	public int $concurrent = 0;
 
 	/**
+	 * The default group this Task has. If no group is specified, still runners will pick up this Task
+	 * when no group as argument is used. The result of this addition is shorter queries
+	 * when requesting a job
+	 *
+	 * @var bool
+	 */
+	public ?string $group = NULL;
+
+	/**
 	 * Set to true if you want to make sure this specific task is never run in parallel, neither
 	 * on the same server, nor any other server. Any worker running will not fetch this task, if any
 	 * job here is already in progress.

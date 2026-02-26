@@ -401,7 +401,7 @@ class Processor {
 	 *
 	 * @return void
 	 */
-	protected function exit(int $signal): void {
+	public function exit(int $signal): void {
 		if ($this->currentJob) {
 			$failureMessage = 'Worker process terminated by signal (SIGTERM) - job execution interrupted due to timeout or manual termination';
 			$capturedOutput = null;
@@ -424,7 +424,7 @@ class Processor {
 	 *
 	 * @return void
 	 */
-	protected function abort(int $signal = 1): void {
+	public function abort(int $signal = 1): void {
 		if ($this->currentJob) {
 			$failureMessage = 'Worker process aborted by signal (' . $signal . ') - job execution interrupted';
 			$capturedOutput = null;
