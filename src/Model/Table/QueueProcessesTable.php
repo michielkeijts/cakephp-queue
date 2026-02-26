@@ -5,6 +5,7 @@ namespace Queue\Model\Table;
 
 use Cake\Core\Configure;
 use Cake\I18n\DateTime;
+use Cake\Log\Log;
 use Cake\ORM\Locator\LocatorAwareTrait;
 use Cake\ORM\Query\SelectQuery;
 use Cake\ORM\Table;
@@ -74,10 +75,18 @@ class QueueProcessesTable extends Table {
 			'className' => 'Queue.QueuedJobs',
 			'foreignKey' => 'workerkey',
 			'bindingKey' => 'workerkey',
-			'propertyName' => 'active_job',
+			'propertyName' => 'jobs',
 			'conditions' => [
 				'CurrentQueuedJobs.completed IS NULL',
 			],
+		]);
+
+
+		$this->hasOne('ActiveQueuedJob', [
+			'className' => 'Queue.QueuedJobs',
+			'foreignKey' => 'id',
+			'bindingKey' => 'active_job_id',
+			'propertyName' => 'active_job'
 		]);
 	}
 
@@ -142,16 +151,30 @@ class QueueProcessesTable extends Table {
 	}
 
 	/**
+	 * Returns the processes for this server in multi-server environment
+	 * otherwise, return all
+	 * @return SelectQuery
+	 */
+	public function findForServer(): SelectQuery {
+		if (Configure::read('Queue.multiserver')) {
+			return $this->find()->where(['server' => $this->buildServerString()]);
+		}
+
+		return $this->find();
+	}
+
+	/**
 	 * @param string $pid
 	 * @param string $key
 	 *
 	 * @return int
 	 */
-	public function add(string $pid, string $key): int {
+	public function add(string $pid, string $key, string $arguments = NULL): int {
 		$data = [
 			'pid' => $pid,
 			'server' => $this->buildServerString(),
 			'workerkey' => $key,
+			'arguments' => $arguments,
 		];
 
 		$queueProcess = $this->newEntity($data);
@@ -167,7 +190,7 @@ class QueueProcessesTable extends Table {
 	 *
 	 * @return void
 	 */
-	public function update(string $pid): void {
+	public function update(string $pid, int $jobId = NULL): void {
 		$conditions = [
 			'pid' => $pid,
 			'server IS' => $this->buildServerString(),
@@ -180,6 +203,8 @@ class QueueProcessesTable extends Table {
 		}
 
 		$queueProcess->modified = new DateTime();
+		$queueProcess->active_job_id = $jobId;
+
 		$this->saveOrFail($queueProcess);
 	}
 
@@ -205,6 +230,35 @@ class QueueProcessesTable extends Table {
 		$thresholdTime = (new DateTime())->subSeconds($timeout);
 
 		return $this->deleteAll(['modified <' => $thresholdTime]);
+	}
+
+	/**
+	 * Remove QueueProcesses which have not an active PID attached
+	 * and Terminates processes which are running out of maximum running time
+	 * @return int
+	 */
+	public function clearProcesses(): int {
+		$timeout = Config::defaultworkertimeout();
+		$thresholdTime = (new DateTime())->subSeconds($timeout);
+
+		$cleaned_processed = 0;
+		foreach ($this->findForServer() as $process) {
+			if ($this->isProcessRunning($process->pid) === FALSE || $process->modified->getTimestamp() < $thresholdTime->getTimestamp()) {
+
+				$this->terminateProcess($process->pid);
+
+				if (!is_null($process->active_job_id)) {
+					$job = $this->CurrentQueuedJobs->findById($process->active_job_id)->first();
+
+					if ($job && is_null($job->completed)) {
+						$this->CurrentQueuedJobs->reset($job->id, TRUE);
+					}
+				}
+				$cleaned_processed++;
+			}
+		}
+
+		return $cleaned_processed;
 	}
 
 	/**
@@ -314,9 +368,12 @@ class QueueProcessesTable extends Table {
 				exec('kill -' . $safeSig . ' ' . $safePid);
 			}
 		}
+
 		sleep(1);
 
-		$this->deleteAll(['pid' => $pid]);
+		if ($this->isProcessRunning($pid) !== TRUE) {
+			$this->deleteAll(['pid' => $pid]);
+		};
 	}
 
 	/**
@@ -361,6 +418,25 @@ class QueueProcessesTable extends Table {
 	}
 
 	/**
+	 * Checks if it is determinable to check if process is running.
+	 * If not, it will return NULL
+	 * @param string $pid
+	 * @return NULL|bool
+	 */
+	public function isProcessRunning (string $pid) : ?bool
+	{
+		if (function_exists('posix_getpgid')) {
+			return posix_getpgid((int)$pid) !== FALSE;
+		}
+
+		if (is_dir('/proc/')) {
+			return file_exists('/proc/' . $pid);
+		}
+
+		return NULL;
+	}
+
+	/**
 	 * @return array<string, string>
 	 */
 	public function serverList(): array {
@@ -373,5 +449,4 @@ class QueueProcessesTable extends Table {
 				valueField: 'server',
 			)->toArray();
 	}
-
 }

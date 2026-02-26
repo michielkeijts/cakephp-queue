@@ -66,6 +66,15 @@ abstract class Task implements TaskInterface {
 	public int $costs = 0;
 
 	/**
+	 * The count of instances of this specific task to run in parallel.
+	 * 0 will not limit the number of instances.
+	 * 1 will be effective the same as a unique constraint
+	 *
+	 * @var bool
+	 */
+	public int $concurrent = 0;
+
+	/**
 	 * Set to true if you want to make sure this specific task is never run in parallel, neither
 	 * on the same server, nor any other server. Any worker running will not fetch this task, if any
 	 * job here is already in progress.
