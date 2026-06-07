@@ -1,6 +1,6 @@
 <?php
 
-use Phinx\Migration\BaseMigration;
+use Migrations\BaseMigration;
 
 class QueueProcessesAddInfo extends BaseMigration {
 
