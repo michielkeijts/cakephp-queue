@@ -1,8 +1,8 @@
 <?php
 
-use Phinx\Migration\AbstractMigration;
+use Phinx\Migration\BaseMigration;
 
-class AddFailedColumns extends AbstractMigration {
+class AddFailedColumns extends BaseMigration {
 
 	/**
 	 * @return void
