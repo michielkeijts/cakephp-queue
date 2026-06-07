@@ -11,7 +11,17 @@ use Cake\Core\Configure;
 use Cake\I18n\Number;
 use Queue\Queue\TaskFinder;
 
+/**
+ * @property \Queue\Model\Table\QueuedJobsTable $QueuedJobs
+ */
 class InfoCommand extends Command {
+
+	/**
+	 * @return string
+	 */
+	public static function getDescription(): string {
+		return 'Show queue status and available tasks.';
+	}
 
 	/**
 	 * @var string|null
@@ -62,6 +72,15 @@ class InfoCommand extends Command {
 
 		$io->out('Current Settings:');
 		$conf = (array)Configure::read('Queue');
+
+		// Map of old config names to new names for display
+		$configMapping = [
+			'defaultworkertimeout' => 'defaultRequeueTimeout',
+			'workermaxruntime' => 'workerLifetime',
+			'defaultworkerretries' => 'defaultJobRetries',
+			'workertimeout' => 'workerPhpTimeout',
+		];
+
 		foreach ($conf as $key => $val) {
 			if ($val === false) {
 				$val = 'no';
@@ -69,7 +88,14 @@ class InfoCommand extends Command {
 			if ($val === true) {
 				$val = 'yes';
 			}
-			$io->out('* ' . $key . ': ' . print_r($val, true));
+
+			// Display new config name if it exists, otherwise use the original
+			$displayKey = $key;
+			if (isset($configMapping[$key])) {
+				$displayKey = $configMapping[$key] . ' (was: ' . $key . ')';
+			}
+
+			$io->out('* ' . $displayKey . ': ' . print_r($val, true));
 		}
 
 		$io->out();

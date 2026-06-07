@@ -65,15 +65,15 @@ Configure::write('Icon', [
 Configure::write('debug', true);
 
 Configure::write('EmailTransport', [
-		'default' => [
-			'className' => 'Debug',
-		],
+	'default' => [
+		'className' => 'Debug',
+	],
 ]);
 Configure::write('Email', [
-		'default' => [
-			'transport' => 'default',
-			'from' => 'you@localhost',
-		],
+	'default' => [
+		'transport' => 'default',
+		'from' => 'you@localhost',
+	],
 ]);
 
 mb_internal_encoding('UTF-8');
@@ -88,16 +88,16 @@ $cache = [
 		'engine' => 'File',
 		'path' => CACHE,
 	],
-	'_cake_core_' => [
+	'_cake_translations_' => [
 		'className' => 'File',
-		'prefix' => 'crud_myapp_cake_core_',
+		'prefix' => 'myapp_cake_translations_',
 		'path' => CACHE . 'persistent/',
 		'serialize' => true,
 		'duration' => '+10 seconds',
 	],
 	'_cake_model_' => [
 		'className' => 'File',
-		'prefix' => 'crud_my_app_cake_model_',
+		'prefix' => 'myapp_cake_model_',
 		'path' => CACHE . 'models/',
 		'serialize' => 'File',
 		'duration' => '+10 seconds',

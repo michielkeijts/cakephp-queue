@@ -1,8 +1,8 @@
 <?php
 
-use Phinx\Migration\AbstractMigration;
+use Migrations\BaseMigration;
 
-class QueueProcessesAddInfo extends AbstractMigration {
+class QueueProcessesAddInfo extends BaseMigration {
 
 	/**
 	 * Change Method.
@@ -10,7 +10,7 @@ class QueueProcessesAddInfo extends AbstractMigration {
 	 * Write your reversible migrations using this method.
 	 *
 	 * More information on writing migrations is available here:
-	 * http://docs.phinx.org/en/latest/migrations.html#the-abstractmigration-class
+	 * http://docs.phinx.org/en/latest/migrations.html#the-BaseMigration-class
 	 *
 	 * @return void
 	 */

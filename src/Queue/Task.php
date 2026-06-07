@@ -32,7 +32,7 @@ abstract class Task implements TaskInterface {
 	 * Timeout in seconds, after which the Task is reassigned to a new worker
 	 * if not finished successfully.
 	 * This should be high enough that it cannot still be running on a zombie worker (>> 2x).
-	 * Defaults to Config::defaultworkertimeout().
+	 * Defaults to Config::defaultworkertimeout() (defaultRequeueTimeout).
 	 *
 	 * @var int|null
 	 */
@@ -40,7 +40,7 @@ abstract class Task implements TaskInterface {
 
 	/**
 	 * Number of times a failed instance of this task should be restarted before giving up.
-	 * Defaults to Config::defaultworkerretries().
+	 * Defaults to Config::defaultworkerretries() (defaultJobRetries).
 	 *
 	 * @var int|null
 	 */
@@ -73,6 +73,15 @@ abstract class Task implements TaskInterface {
 	 * @var bool
 	 */
 	public int $concurrent = 0;
+
+	/**
+	 * The default group this Task has. If no group is specified, still runners will pick up this Task
+	 * when no group as argument is used. The result of this addition is shorter queries
+	 * when requesting a job
+	 *
+	 * @var bool
+	 */
+	public ?string $group = NULL;
 
 	/**
 	 * Set to true if you want to make sure this specific task is never run in parallel, neither

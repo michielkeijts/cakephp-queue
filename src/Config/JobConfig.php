@@ -3,6 +3,7 @@
 namespace Queue\Config;
 
 use InvalidArgumentException;
+use Queue\Model\Enum\Priority;
 use RuntimeException;
 
 /**
@@ -132,6 +133,10 @@ class JobConfig {
 				$field = $this->field($field, $type);
 			}
 
+			if ($field === 'priority' && $value instanceof Priority) {
+				$value = $value->value;
+			}
+
 			$this->$field = $value;
 		}
 
@@ -219,24 +224,28 @@ class JobConfig {
 	}
 
 	/**
-	 * @param int|null $priority
+	 * @param \Queue\Model\Enum\Priority|int|null $priority
 	 *
 	 * @return $this
 	 */
-	public function setPriority(?int $priority) {
+	public function setPriority(Priority|int|null $priority) {
+		if ($priority instanceof Priority) {
+			$priority = $priority->value;
+		}
 		$this->priority = $priority;
 
 		return $this;
 	}
 
 	/**
-	 * @param int $priority
-	 *
-	 * @throws \RuntimeException If value is not present.
+	 * @param \Queue\Model\Enum\Priority|int $priority
 	 *
 	 * @return $this
 	 */
-	public function setPriorityOrFail(int $priority) {
+	public function setPriorityOrFail(Priority|int $priority) {
+		if ($priority instanceof Priority) {
+			$priority = $priority->value;
+		}
 		$this->priority = $priority;
 
 		return $this;
@@ -245,7 +254,7 @@ class JobConfig {
 	/**
 	 * @return int|null
 	 */
-	public function getPriority(): ?int {
+	public function getPriority(): int|null {
 		return $this->priority;
 	}
 
@@ -282,8 +291,6 @@ class JobConfig {
 
 	/**
 	 * @param \Cake\I18n\DateTime|string|int|null $notBefore
-	 *
-	 * @throws \RuntimeException If value is not present.
 	 *
 	 * @return $this
 	 */
@@ -337,8 +344,6 @@ class JobConfig {
 	/**
 	 * @param string $group
 	 *
-	 * @throws \RuntimeException If value is not present.
-	 *
 	 * @return $this
 	 */
 	public function setGroupOrFail(string $group) {
@@ -388,8 +393,6 @@ class JobConfig {
 	/**
 	 * @param string $reference
 	 *
-	 * @throws \RuntimeException If value is not present.
-	 *
 	 * @return $this
 	 */
 	public function setReferenceOrFail(string $reference) {
@@ -438,8 +441,6 @@ class JobConfig {
 
 	/**
 	 * @param string $status
-	 *
-	 * @throws \RuntimeException If value is not present.
 	 *
 	 * @return $this
 	 */

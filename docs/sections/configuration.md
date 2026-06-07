@@ -19,30 +19,46 @@ You may create a file called `app_queue.php` inside your `config` folder (NOT th
 - Default timeout after which a job is requeued if the worker doesn't report back:
 
     ```php
-    $config['Queue']['defaultworkertimeout'] = 1800;
+    $config['Queue']['defaultRequeueTimeout'] = 180; // 3 minutes
+    // Legacy: 'defaultworkertimeout' is deprecated but still supported
     ```
+
+  **Note:** Individual task `timeout` values are automatically capped to this `defaultRequeueTimeout` value to prevent duplicate execution. If a task needs a longer timeout, increase `defaultRequeueTimeout` accordingly (recommended: at least 2x your longest task timeout).
 
 - Default number of retries if a job fails or times out:
 
     ```php
-    $config['Queue']['defaultworkerretries'] = 3;
+    $config['Queue']['defaultJobRetries'] = 3;
+    // Legacy: 'defaultworkerretries' is deprecated but still supported
     ```
 
-- Seconds of running time after which the worker will terminate (0 = unlimited):
+- Seconds of running time after which the worker process will terminate:
 
     ```php
-    $config['Queue']['workermaxruntime'] = 120;
+    $config['Queue']['workerLifetime'] = 60; // 1 minute (same as respawn time)
+    // Legacy: 'workermaxruntime' is deprecated but still supported
     ```
 
-  *Warning:* Do not use 0 if you are using a cronjob to permanantly start a new worker once in a while and if you do not exit on idle.
+  **Important:** While 0 (unlimited) is technically allowed, it is **strongly discouraged**. Using 0 means workers will run indefinitely, which can lead to workers piling up if spawned faster than they can naturally terminate (e.g., when there are no jobs), potentially overloading your server.
 
-- Seconds of running time after which the PHP process of the worker will terminate (0 = unlimited):
+  If you need workers to run for extended periods, use a very large value (e.g., 86400 for 24 hours). However, it's recommended to use shorter durations (e.g., 60-300 seconds) with cronjob respawning for better control and safety.
+
+  **Note:** You can override this config value using the `--max-runtime` CLI option:
+  ```bash
+  bin/cake queue run --max-runtime 0     # Run indefinitely (only for local dev/debug)
+  bin/cake queue run --max-runtime 300   # Run for 5 minutes
+  ```
+
+- Seconds of running time after which the PHP process of the worker will terminate:
 
     ```php
-    $config['Queue']['workertimeout'] = 120 * 100;
+    $config['Queue']['workerPhpTimeout'] = 120; // 2 minutes
+    // Legacy: 'workertimeout' is deprecated but still supported
     ```
 
-  *Warning:* Do not use 0 if you are using a cronjob to permanently start a new worker once in a while and if you do not exit on idle. This is the last defense of the tool to prevent flooding too many processes. So make sure this is long enough to never cut off jobs, but also not too long, so the process count stays in manageable range.
+  **Important:** While technically 0 (unlimited) is allowed for this setting, it is **strongly discouraged** if you are using a cronjob to permanently start new workers and if you do not exit on idle. This timeout serves as the last line of defense to prevent an excessive number of worker processes from accumulating, which could overload your server.
+
+  Set this value high enough to never cut off running jobs, but low enough to keep the process count manageable. A good practice is to set it to at least 2x your `workerLifetime` value.
 
 - Should a worker process quit when there are no more tasks for it to execute (true = exit, false = keep running):
 
@@ -59,13 +75,13 @@ You may create a file called `app_queue.php` inside your `config` folder (NOT th
 - Max workers (per server):
 
     ```php
-    $config['Queue']['maxworkers'] = 3 // Defaults to 1 (single worker can be run per server)
+    $config['Queue']['maxworkers'] = 3; // Defaults to 1 (single worker can be run per server)
     ```
 
 - Multi-server setup:
 
     ```php
-    $config['Queue']['multiserver'] = true // Defaults to false (single server)
+    $config['Queue']['multiserver'] = true; // Defaults to false (single server)
     ```
 
   For multiple servers running either CLI/web separately, or even multiple CLI workers on top, make sure to enable this.
@@ -94,15 +110,16 @@ You may create a file called `app_queue.php` inside your `config` folder (NOT th
     ```
 
 Don't forget to load that config file with `Configure::load('app_queue');` in your bootstrap.
-You can also use `$this->addPlugin('Queue', ['bootstrap' => true]);` which will load your `app_queue.php` config file automatically.
 
 Example `app_queue.php`:
 
 ```php
 return [
     'Queue' => [
-        'workermaxruntime' => 60,
-        'sleeptime' => 15,
+        'workerLifetime' => 60,           // Worker process runs for 60 seconds
+        'defaultRequeueTimeout' => 300,   // Jobs requeued after 5 minutes if not completed
+        'defaultJobRetries' => 2,          // Retry failed jobs twice
+        'sleeptime' => 15,                 // Sleep 15 seconds when no jobs
     ],
 ];
 ```
@@ -130,18 +147,42 @@ You can set two main things on each task as property: timeout and retries.
     /**
      * Timeout for this task in seconds, after which the task is reassigned to a new worker.
      *
-     * @var int
+     * @var ?int
      */
-    public $timeout = 120;
+    public ?int $timeout = 120;
 
     /**
      * Number of times a failed instance of this task should be restarted before giving up.
      *
-     * @var int
+     * @var ?int
      */
-    public $retries = 1;
+    public ?int $retries = 1;
 ```
 Make sure you set the timeout high enough so that it could never run longer than this, otherwise you risk it being re-run while still being run.
 It is recommended setting it to at least 2x the maximum possible execution length. See [Concurrent workers](limitations.md)
 
 Set the retries to at least 1, otherwise it will never execute again after failure in the first run.
+
+### Configure-based task overrides
+
+You can also override task properties via Configure, which is useful for:
+- Third-party tasks you cannot modify
+- Environment-specific settings (dev vs production)
+- Centralized configuration management
+
+```php
+$config['Queue']['tasks'] = [
+    'Queue.ProgressExample' => [
+        'timeout' => 300,   // Override the task's timeout
+        'retries' => 5,     // Override the task's retries
+    ],
+    'MyPlugin.HeavyTask' => [
+        'timeout' => 600,
+        'rate' => 10,
+        'costs' => 50,
+        'unique' => true,
+    ],
+];
+```
+
+The priority order is: Configure override > Task class property > Global default.

@@ -39,9 +39,9 @@ class QueueTransport extends AbstractTransport {
 
 		/** @var \Queue\Model\Table\QueuedJobsTable $QueuedJobs */
 		$QueuedJobs = $this->getTableLocator()->get('Queue.QueuedJobs');
-		$result = $QueuedJobs->createJob('Queue.Email', ['transport' => $transport, 'settings' => $message->__serialize(), 'serialized' => TRUE, 'class' => get_class($message)]);
-		$result['headers'] = $message->getHeadersString();
-		$result['message'] = $message->getBodyString();
+		$result = $QueuedJobs->createJob('Queue.Email', ['transport' => $transport, 'settings' => $message]);
+		$result->headers = $message->getHeadersString();
+		$result->message = $message->getBodyString();
 
 		return $result->toArray();
 	}

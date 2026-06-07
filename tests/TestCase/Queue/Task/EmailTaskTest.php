@@ -96,7 +96,7 @@ class EmailTaskTest extends TestCase {
 
 		/** @var \Queue\Model\Table\QueuedJobsTable $queuedJobsTable */
 		$queuedJobsTable = $this->getTableLocator()->get('Queue.QueuedJobs');
-		$queuedJobsTable->createJob('Email', $data);
+		$queuedJobsTable->createJob('Queue.Email', $data);
 
 		/** @var \Queue\Model\Entity\QueuedJob $queuedJob */
 		$queuedJob = $queuedJobsTable->find()->orderByDesc('id')->firstOrFail();
@@ -137,7 +137,7 @@ class EmailTaskTest extends TestCase {
 
 		/** @var \Queue\Model\Table\QueuedJobsTable $queuedJobsTable */
 		$queuedJobsTable = $this->getTableLocator()->get('Queue.QueuedJobs');
-		$queuedJobsTable->createJob('Email', $data);
+		$queuedJobsTable->createJob('Queue.Email', $data);
 
 		/** @var \Queue\Model\Entity\QueuedJob $queuedJob */
 		$queuedJob = $queuedJobsTable->find()->orderByDesc('id')->firstOrFail();
@@ -244,6 +244,57 @@ class EmailTaskTest extends TestCase {
 		];
 
 		$this->Task->run($data, 0);
+	}
+
+	/**
+	 * Test that attachments are properly handled when passed as an array
+	 *
+	 * @return void
+	 */
+	public function testRunWithAttachments() {
+		// Create temporary files for testing
+		$tmpFile1 = tempnam(sys_get_temp_dir(), 'test_file1_') . '.txt';
+		$tmpFile2 = tempnam(sys_get_temp_dir(), 'test_file2_') . '.pdf';
+
+		file_put_contents($tmpFile1, 'Test content for file 1');
+		file_put_contents($tmpFile2, 'Test content for file 2');
+
+		$attachments = [
+			'file1.txt' => [
+				'file' => $tmpFile1,
+				'mimetype' => 'text/plain',
+			],
+			'file2.pdf' => $tmpFile2,
+		];
+
+		$settings = [
+			'from' => 'test@test.de',
+			'to' => 'recipient@test.de',
+			'subject' => 'Test with attachments',
+			'attachments' => $attachments,
+		];
+
+		$data = [
+			'settings' => $settings,
+			'content' => 'Email with attachments',
+		];
+
+		$this->Task->run($data, 0);
+
+		$this->assertInstanceOf(Mailer::class, $this->Task->mailer);
+
+		$mailerAttachments = $this->Task->mailer->getMessage()->getAttachments();
+		$this->assertCount(2, $mailerAttachments);
+		$this->assertArrayHasKey('file1.txt', $mailerAttachments);
+		$this->assertArrayHasKey('file2.pdf', $mailerAttachments);
+		$this->assertSame($tmpFile1, $mailerAttachments['file1.txt']['file']);
+		$this->assertSame('text/plain', $mailerAttachments['file1.txt']['mimetype']);
+		$this->assertSame($tmpFile2, $mailerAttachments['file2.pdf']['file']);
+		$this->assertSame('application/pdf', $mailerAttachments['file2.pdf']['mimetype']);
+
+		// Clean up temporary files
+		unlink($tmpFile1);
+		unlink($tmpFile2);
 	}
 
 	/**

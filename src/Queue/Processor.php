@@ -7,6 +7,8 @@ use Cake\Console\CommandInterface;
 use Cake\Core\Configure;
 use Cake\Core\ContainerInterface;
 use Cake\Datasource\Exception\RecordNotFoundException;
+use Cake\Event\Event;
+use Cake\Event\EventManager;
 use Cake\ORM\Exception\PersistenceFailedException;
 use Cake\ORM\Locator\LocatorAwareTrait;
 use Cake\Utility\Text;
@@ -19,8 +21,13 @@ use Queue\Model\Table\QueuedJobsTable;
 use Queue\Model\Table\QueueProcessesTable;
 use RuntimeException;
 use Throwable;
+use const SIGINT;
+use const SIGQUIT;
+use const SIGTERM;
+use const SIGTSTP;
+use const SIGUSR1;
 
-declare(ticks = 1);
+// Enable async signal handling (replaces declare(ticks=1) for better performance)
 
 /**
  * Main shell to init and run queue workers.
@@ -75,6 +82,16 @@ class Processor {
 	protected QueueProcessesTable $QueueProcesses;
 
 	/**
+	 * @var \Queue\Model\Entity\QueuedJob|null
+	 */
+	protected ?QueuedJob $currentJob = null;
+
+	/**
+	 * @var bool|null
+	 */
+	protected ?bool $captureOutput = null;
+
+	/**
 	 * @param \Queue\Console\Io $io
 	 * @param \Psr\Log\LoggerInterface $logger
 	 * @param \Cake\Core\ContainerInterface|null $container
@@ -100,7 +117,7 @@ class Processor {
 		try {
 			$pid = $this->initPid(implode(' ', $_SERVER['argv']));
 		} catch (PersistenceFailedException $exception) {
-			$this->io->err($exception->getMessage());
+			$this->io->error($exception->getMessage());
 			$limit = (int)Configure::read('Queue.maxworkers');
 			if ($limit) {
 				$this->io->out('Cannot start worker: Too many workers already/still running on this server (' . $limit . '/' . $limit . ')');
@@ -111,9 +128,10 @@ class Processor {
 			return CommandInterface::CODE_ERROR;
 		}
 
-		// Enable Garbage Collector (PHP >= 5.3)
-		if (function_exists('gc_enable')) {
-			gc_enable();
+		gc_enable();
+
+		if (function_exists('pcntl_async_signals')) {
+			pcntl_async_signals(true);
 		}
 		if (function_exists('pcntl_signal')) {
 			pcntl_signal(SIGTERM, [&$this, 'exit']);
@@ -134,7 +152,7 @@ class Processor {
 		$startTime = time();
 
 		while (!$this->exit) {
-			$this->setPhpTimeout();
+			$this->setPhpTimeout($config['maxruntime']);
 
 			try {
 				$this->updatePid($pid);
@@ -167,10 +185,15 @@ class Processor {
 				sleep(Config::sleeptime());
 			}
 
+			$workerLifetime = Configure::read('Queue.workerLifetime') ?? Configure::read('Queue.workermaxruntime');
+			if ($workerLifetime === null && $config['maxruntime'] === null) {
+				throw new RuntimeException('Queue.workerLifetime (or deprecated workermaxruntime) config is required');
+			}
+			$maxRuntime = $config['maxruntime'] ?? (int)$workerLifetime;
 			// check if we are over the maximum runtime and end processing if so.
-			if (Configure::readOrFail('Queue.workermaxruntime') && (time() - $startTime) >= Configure::readOrFail('Queue.workermaxruntime')) {
+			if ($maxRuntime > 0 && (time() - $startTime) >= $maxRuntime) {
 				$this->exit = true;
-				$this->io->out('Reached runtime of ' . (time() - $startTime) . ' Seconds (Max ' . Configure::readOrFail('Queue.workermaxruntime') . '), terminating.');
+				$this->io->out('Reached runtime of ' . (time() - $startTime) . ' Seconds (Max ' . $maxRuntime . '), terminating.');
 			}
 			if ($this->exit || mt_rand(0, 100) > 100 - (int)Config::gcprob()) {
 				$this->io->out('Performing Old job cleanup.');
@@ -197,9 +220,22 @@ class Processor {
 	 * @return void
 	 */
 	protected function runJob(QueuedJob $queuedJob, string $pid): void {
+		$this->currentJob = $queuedJob;
 		$this->io->out('Running Job of type "' . $queuedJob->job_task . '"');
 		$this->log('job ' . $queuedJob->job_task . ', id ' . $queuedJob->id, $pid, false);
 		$taskName = $queuedJob->job_task;
+
+		// Dispatch started event
+		$event = new Event('Queue.Job.started', $this, [
+			'job' => $queuedJob,
+		]);
+		EventManager::instance()->dispatch($event);
+
+		$captureOutput = $this->captureOutput();
+		if ($captureOutput) {
+			$maxOutputSize = (int)(Configure::read('Queue.maxOutputSize') ?: 65536);
+			$this->io->enableOutputCapture($maxOutputSize);
+		}
 
 		$return = $failureMessage = null;
 		try {
@@ -227,19 +263,49 @@ class Processor {
 			$this->logError($taskName . ' (job ' . $queuedJob->id . ')' . "\n" . $failureMessage, $pid);
 		}
 
-		$this->QueueProcesses->update($pid, NULL);
+		$capturedOutput = null;
+		if ($captureOutput) {
+			$maxOutputSize = (int)(Configure::read('Queue.maxOutputSize') ?: 65536);
+			$capturedOutput = $this->io->getOutputAsText($maxOutputSize);
+			$this->io->disableOutputCapture();
+		}
 
 		if ($return === false) {
-			$this->QueuedJobs->markJobFailed($queuedJob, $failureMessage);
+			$this->QueuedJobs->markJobFailed($queuedJob, $failureMessage, $capturedOutput);
 			$failedStatus = $this->QueuedJobs->getFailedStatus($queuedJob, $this->getTaskConf());
 			$this->log('job ' . $queuedJob->job_task . ', id ' . $queuedJob->id . ' failed and ' . $failedStatus, $pid);
 			$this->io->out('Job did not finish, ' . $failedStatus . ' after try ' . $queuedJob->attempts . '.');
 
+			// Dispatch failed event
+			$event = new Event('Queue.Job.failed', $this, [
+				'job' => $queuedJob,
+				'failureMessage' => $failureMessage,
+				'exception' => $e ?? null,
+			]);
+			EventManager::instance()->dispatch($event);
+
+			// Dispatch event when job has exhausted all retries
+			if ($failedStatus === 'aborted') {
+				$event = new Event('Queue.Job.maxAttemptsExhausted', $this, [
+					'job' => $queuedJob,
+					'failureMessage' => $failureMessage,
+				]);
+				EventManager::instance()->dispatch($event);
+			}
+
 			return;
 		}
 
-		$this->QueuedJobs->markJobDone($queuedJob);
+		$this->QueuedJobs->markJobDone($queuedJob, $capturedOutput);
+
+		// Dispatch completed event
+		$event = new Event('Queue.Job.completed', $this, [
+			'job' => $queuedJob,
+		]);
+		EventManager::instance()->dispatch($event);
+
 		$this->io->out('Job Finished.');
+		$this->currentJob = null;
 	}
 
 	/**
@@ -305,13 +371,49 @@ class Processor {
 	}
 
 	/**
+	 * Whether to capture task output into the DB.
+	 *
+	 * Auto-detects based on `output` column existence if not explicitly configured.
+	 *
+	 * @return bool
+	 */
+	protected function captureOutput(): bool {
+		if ($this->captureOutput === null) {
+			$configured = Configure::read('Queue.captureOutput');
+			if ($configured !== null) {
+				$this->captureOutput = (bool)$configured;
+			} else {
+				try {
+					$this->captureOutput = $this->QueuedJobs->getSchema()->hasColumn('output');
+				} catch (Throwable) {
+					$this->captureOutput = false;
+				}
+			}
+		}
+
+		return $this->captureOutput;
+	}
+
+	/**
 	 * Signal handling to queue worker for clean shutdown
 	 *
 	 * @param int $signal
 	 *
 	 * @return void
 	 */
-	protected function exit(int $signal): void {
+	public function exit(int $signal): void {
+		if ($this->currentJob) {
+			$failureMessage = 'Worker process terminated by signal (SIGTERM) - job execution interrupted due to timeout or manual termination';
+			$capturedOutput = null;
+			if ($this->captureOutput()) {
+				$maxOutputSize = (int)(Configure::read('Queue.maxOutputSize') ?: 65536);
+				$capturedOutput = $this->io->getOutputAsText($maxOutputSize);
+				$this->io->disableOutputCapture();
+			}
+			$this->QueuedJobs->markJobFailed($this->currentJob, $failureMessage, $capturedOutput);
+			$this->logError('Job ' . $this->currentJob->job_task . ' (id ' . $this->currentJob->id . ') failed due to worker termination', $this->pid);
+			$this->currentJob = null;
+		}
 		$this->exit = true;
 	}
 
@@ -322,7 +424,19 @@ class Processor {
 	 *
 	 * @return void
 	 */
-	protected function abort(int $signal = 1): void {
+	public function abort(int $signal = 1): void {
+		if ($this->currentJob) {
+			$failureMessage = 'Worker process aborted by signal (' . $signal . ') - job execution interrupted';
+			$capturedOutput = null;
+			if ($this->captureOutput()) {
+				$maxOutputSize = (int)(Configure::read('Queue.maxOutputSize') ?: 65536);
+				$capturedOutput = $this->io->getOutputAsText($maxOutputSize);
+				$this->io->disableOutputCapture();
+			}
+			$this->QueuedJobs->markJobFailed($this->currentJob, $failureMessage, $capturedOutput);
+			$this->currentJob = null;
+		}
+
 		$this->deletePid($this->pid);
 
 		exit($signal);
@@ -436,15 +550,38 @@ class Processor {
 	}
 
 	/**
-	 * Makes sure accidental overriding isn't possible, uses workermaxruntime times 100 by default.
+	 * Makes sure accidental overriding isn't possible, uses workermaxruntime times 2 by default.
 	 * If available, uses workertimeout config directly.
+	 *
+	 * @param int|null $maxruntime Max runtime in seconds if set via CLI option.
 	 *
 	 * @return void
 	 */
-	protected function setPhpTimeout(): void {
-		$timeLimit = (int)Configure::readOrFail('Queue.workermaxruntime') * 100;
-		if (Configure::read('Queue.workertimeout') !== null) {
-			$timeLimit = (int)Configure::read('Queue.workertimeout');
+	protected function setPhpTimeout(?int $maxruntime): void {
+		if ($maxruntime) {
+			set_time_limit($maxruntime * 2);
+
+			return;
+		}
+
+		// Check for new config name first, fall back to old name for backward compatibility
+		$phpTimeout = Configure::read('Queue.workerPhpTimeout');
+		if ($phpTimeout === null) {
+			$phpTimeout = Configure::read('Queue.workertimeout');
+			if ($phpTimeout !== null) {
+				trigger_error(
+					'Config key "Queue.workertimeout" is deprecated. Use "Queue.workerPhpTimeout" instead.',
+					E_USER_DEPRECATED,
+				);
+			}
+		}
+
+		if ($phpTimeout !== null) {
+			$timeLimit = (int)$phpTimeout;
+		} else {
+			// Default to workermaxruntime * 2 (or workerLifetime * 2 with new naming)
+			$workerLifetime = Configure::read('Queue.workerLifetime') ?? Configure::read('Queue.workermaxruntime', 60);
+			$timeLimit = (int)$workerLifetime * 2;
 		}
 
 		set_time_limit($timeLimit);
@@ -460,6 +597,7 @@ class Processor {
 			'groups' => [],
 			'types' => [],
 			'verbose' => false,
+			'maxruntime' => null,
 		];
 		if (!empty($args['verbose'])) {
 			$config['verbose'] = true;
@@ -469,6 +607,9 @@ class Processor {
 		}
 		if (!empty($args['type'])) {
 			$config['types'] = $this->stringToArray($args['type']);
+		}
+		if (isset($args['max-runtime']) && $args['max-runtime'] !== '') {
+			$config['maxruntime'] = (int)$args['max-runtime'];
 		}
 
 		return $config;

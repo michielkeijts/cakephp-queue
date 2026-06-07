@@ -8,6 +8,8 @@ use Cake\ORM\Exception\PersistenceFailedException;
 use Cake\ORM\TableRegistry;
 use Cake\TestSuite\TestCase;
 use Queue\Model\Table\QueueProcessesTable;
+use const SIG_DFL;
+use const SIGUSR1;
 
 /**
  * Queue\Model\Table\QueueProcessesTable Test Case

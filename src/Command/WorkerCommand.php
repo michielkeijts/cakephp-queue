@@ -17,6 +17,13 @@ use Queue\Queue\Config;
  */
 class WorkerCommand extends Command {
 
+	/**
+	 * @return string
+	 */
+	public static function getDescription(): string {
+		return 'Manage queue workers.';
+	}
+
 	protected QueueProcessesTable $QueueProcesses;
 
 	/**
@@ -105,6 +112,7 @@ class WorkerCommand extends Command {
 			$io->abort('Clean action does not have a 2nd argument.');
 		}
 
+		/** @phpstan-ignore-next-line */
 		return $this->$action($io, $pid);
 	}
 
@@ -189,7 +197,7 @@ class WorkerCommand extends Command {
 	protected function clean(ConsoleIo $io): int {
 		$timeout = Config::defaultworkertimeout();
 		if (!$timeout) {
-			$io->abort('You disabled `defaultworkertimeout` in config. Aborting.');
+			$io->abort('You disabled `defaultRequeueTimeout` in config. Aborting.');
 		}
 		$thresholdTime = (new DateTime())->subSeconds($timeout);
 

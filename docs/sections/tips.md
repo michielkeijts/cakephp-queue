@@ -7,8 +7,8 @@ Especially if you use PHPStorm, this will make it possible to get support here.
 
 Include that plugin, set up your generator config and run e.g. `bin/cake phpstorm generate`.
 
-If you use `$this->addPlugin('Queue', ['bootstrap' => true, ...])`, the necessary config is already auto-included (recommended).
-Otherwise you can manually include the Queue plugin generator tasks in your `config/app.php` on project level:
+If you have bootstrap loading enabled, the necessary config is already auto-included (recommended).
+Otherwise, you can manually include the Queue plugin generator tasks in your `config/app.php` on project level:
 
 ```php
 use Queue\Generator\Task\QueuedJobTask;
@@ -99,9 +99,11 @@ Thus it is disabled by default for trivial use cases.
 
 ## Killing workers
 
-First of all: Make sure you don't run workers with `workermaxruntime` and `workertimeout` of `0`.
-Then they would at least not run forever, and might pile up only if you start them faster then they terminate.
-That can overload the server.
+**Important:** The `workerLifetime` setting cannot be set to 0 - it will throw a RuntimeException if you try. This is by design to prevent workers from running indefinitely and potentially overloading your server. If you need long-running workers, use a very large value instead (e.g., 86400 for 24 hours).
+
+Similarly, avoid setting `workerPhpTimeout` to 0 (unlimited). While technically allowed, this removes the last safeguard against process accumulation and can lead to server overload if workers start faster than they terminate.
+
+Note: The old config names `workermaxruntime` and `workertimeout` are deprecated but still supported.
 
 ### Via tool
 

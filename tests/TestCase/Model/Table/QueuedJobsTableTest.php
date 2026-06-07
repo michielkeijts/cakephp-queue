@@ -11,9 +11,12 @@ namespace Queue\Test\TestCase\Model\Table;
 
 use Cake\Core\Configure;
 use Cake\Datasource\ConnectionManager;
+use Cake\Event\EventList;
+use Cake\Event\EventManager;
 use Cake\I18n\DateTime;
 use Cake\ORM\TableRegistry;
 use Cake\TestSuite\TestCase;
+use Queue\Model\Enum\Priority;
 use Queue\Model\Table\QueuedJobsTable;
 use Queue\Queue\Task\ExampleTask;
 use TestApp\Dto\MyTaskDto;
@@ -694,7 +697,7 @@ class QueuedJobsTableTest extends TestCase {
 		$this->assertTrue((bool)$this->QueuedJobs->createJob('Foo', $data));
 
 		$data = ['key' => 'k2'];
-		$this->assertTrue((bool)$this->QueuedJobs->createJob('Foo', $data, ['priority' => 1]));
+		$this->assertTrue((bool)$this->QueuedJobs->createJob('Foo', $data, ['priority' => Priority::Critical]));
 
 		$data = ['key' => 'k3'];
 		$this->assertTrue((bool)$this->QueuedJobs->createJob('Foo', $data, ['priority' => 6]));
@@ -749,6 +752,20 @@ class QueuedJobsTableTest extends TestCase {
 
 		$this->assertWithinRange(3600, (int)$queuedJob->runtime, 1);
 		$this->assertWithinRange(7200, (int)$queuedJob->fetchdelay, 1);
+	}
+
+	/**
+	 * Test that Queue.Job.created event is fired when a job is created.
+	 *
+	 * @return void
+	 */
+	public function testJobCreatedEventFired(): void {
+		$eventList = new EventList();
+		EventManager::instance()->setEventList($eventList);
+
+		$this->QueuedJobs->createJob('Queue.Example', ['test' => 'data']);
+
+		$this->assertEventFired('Queue.Job.created');
 	}
 
 	/**

@@ -4,11 +4,12 @@ declare(strict_types=1);
 namespace Queue\Model\Table;
 
 use ArrayObject;
+use Cake\Collection\Collection;
 use Cake\Core\Configure;
 use Cake\Core\Plugin;
+use Cake\Event\Event;
 use Cake\Event\EventInterface;
-use Cake\Http\Exception\NotImplementedException;
-use Cake\I18n\Date;
+use Cake\Event\EventManager;
 use Cake\I18n\DateTime;
 use Cake\ORM\Query\SelectQuery;
 use Cake\ORM\Table;
@@ -17,10 +18,10 @@ use CakeDto\Dto\FromArrayToArrayInterface;
 use InvalidArgumentException;
 use Queue\Config\JobConfig;
 use Queue\Model\Entity\QueuedJob;
+use Queue\Model\Filter\QueuedJobsCollection;
 use Queue\Queue\Config;
 use Queue\Queue\TaskFinder;
-use RuntimeException;
-use Search\Manager;
+use Queue\Utility\Memory;
 use Cake\Database\Schema\TableSchemaInterface;
 
 /**
@@ -32,7 +33,7 @@ use Cake\Database\Schema\TableSchemaInterface;
  * @method \Queue\Model\Entity\QueuedJob|false save(\Cake\Datasource\EntityInterface $entity, array $options = [])
  * @method \Queue\Model\Entity\QueuedJob patchEntity(\Cake\Datasource\EntityInterface $entity, array $data, array $options = [])
  * @method array<\Queue\Model\Entity\QueuedJob> patchEntities(iterable $entities, array $data, array $options = [])
- * @method \Queue\Model\Entity\QueuedJob findOrCreate($search, ?callable $callback = null, array $options = [])
+ * @method \Queue\Model\Entity\QueuedJob findOrCreate(\Cake\ORM\Query\SelectQuery|callable|array $search, ?callable $callback = null, array $options = [])
  * @mixin \Cake\ORM\Behavior\TimestampBehavior
  * @method \Queue\Model\Entity\QueuedJob saveOrFail(\Cake\Datasource\EntityInterface $entity, array $options = [])
  * @mixin \Search\Model\Behavior\SearchBehavior
@@ -42,6 +43,7 @@ use Cake\Database\Schema\TableSchemaInterface;
  * @method \Cake\Datasource\ResultSetInterface<\Queue\Model\Entity\QueuedJob> saveManyOrFail(iterable $entities, array $options = [])
  * @method \Cake\Datasource\ResultSetInterface<\Queue\Model\Entity\QueuedJob>|false deleteMany(iterable $entities, array $options = [])
  * @method \Cake\Datasource\ResultSetInterface<\Queue\Model\Entity\QueuedJob> deleteManyOrFail(iterable $entities, array $options = [])
+ * @extends \Cake\ORM\Table<array{Search: \Search\Model\Behavior\SearchBehavior, Timestamp: \Cake\ORM\Behavior\TimestampBehavior}>
  */
 class QueuedJobsTable extends Table {
 
@@ -116,7 +118,9 @@ class QueuedJobsTable extends Table {
 
 		$this->addBehavior('Timestamp');
 		if (Configure::read('Queue.isSearchEnabled') !== false && Plugin::isLoaded('Search')) {
-			$this->addBehavior('Search.Search');
+			$this->addBehavior('Search.Search', [
+				'collectionClass' => QueuedJobsCollection::class,
+			]);
 		}
 
 		$this->belongsTo('WorkerProcesses', [
@@ -151,45 +155,6 @@ class QueuedJobsTable extends Table {
 		if (isset($data['data']) && $data['data'] === '') {
 			$data['data'] = null;
 		}
-	}
-
-	/**
-	 * @return \Search\Manager
-	 */
-	public function searchManager(): Manager {
-		$searchManager = $this->behaviors()->Search->searchManager();
-		$searchManager
-			->value('job_task')
-			->like('search', ['fields' => ['job_group', 'reference', 'status'], 'before' => true, 'after' => true])
-			->add('status', 'Search.Callback', [
-				'callback' => function (SelectQuery $query, array $args, $filter) {
-					$status = $args['status'];
-					if ($status === 'completed') {
-						$query->where(['completed IS NOT' => null]);
-
-						return true;
-					}
-					if ($status === 'in_progress') {
-						$query->where([
-						'completed IS' => null,
-						'OR' => [
-							'notbefore <=' => new DateTime(),
-							'notbefore IS' => null,
-						]]);
-
-						return true;
-					}
-					if ($status === 'scheduled') {
-						$query->where(['completed IS' => null, 'notbefore >' => new DateTime()]);
-
-						return true;
-					}
-
-					throw new NotImplementedException('Invalid status type');
-				},
-			]);
-
-		return $searchManager;
 	}
 
 	/**
@@ -256,7 +221,7 @@ class QueuedJobsTable extends Table {
 		$queuedJob = [
 			'job_task' => $this->jobTask($jobTask),
 			'data' => $data,
-			'notbefore' => $config->hasNotBefore() ? $this->getDateTime($config->getNotBeforeOrFail()) : null,
+			'notbefore' => $config->hasNotBefore() ? $this->getDateTime($config->getNotBeforeOrFail()) : NULL,
 			'priority' => $config->getPriority(),
 		] + $config->toArray();
 
@@ -264,9 +229,19 @@ class QueuedJobsTable extends Table {
 			unset($queuedJob['priority']);
 		}
 
-		$queuedJob = $this->newEntity($queuedJob);
+		if ($queuedJob['notbefore'] === null) {
+			unset($queuedJob['notbefore']);
+		}
 
-		return $this->saveOrFail($queuedJob);
+		$queuedJob = $this->newEntity($queuedJob);
+		$queuedJob = $this->saveOrFail($queuedJob);
+
+		$event = new Event('Queue.Job.created', $this, [
+			'job' => $queuedJob,
+		]);
+		EventManager::instance()->dispatch($event);
+
+		return $queuedJob;
 	}
 
 	/**
@@ -351,18 +326,9 @@ class QueuedJobsTable extends Table {
 	 * @return \Cake\ORM\Query\SelectQuery
 	 */
 	public function getTypes(): SelectQuery {
-		$findCond = [
-			'fields' => [
-				'job_task',
-			],
-			'group' => [
-				'job_task',
-			],
-			'keyField' => 'job_task',
-			'valueField' => 'job_task',
-		];
-
-		return $this->find('list', ...$findCond);
+		return $this->find('list', keyField: 'job_task', valueField: 'job_task')
+			->select(['job_task'])
+			->groupBy(['job_task']);
 	}
 
 	/**
@@ -412,12 +378,10 @@ class QueuedJobsTable extends Table {
 			'conditions' => [
 				'completed IS NOT' => null,
 			],
-			'group' => [
-				'job_task',
-			],
 		];
 
-		$query = $this->find('all', ...$options);
+		$query = $this->find('all', ...$options)
+			->groupBy(['job_task']);
 		if ($disableHydration) {
 			$query = $query->disableHydration();
 		}
@@ -448,18 +412,18 @@ class QueuedJobsTable extends Table {
 	public function getFullStats(?string $jobTask = null): array {
 		$driverName = $this->getDriverName();
 		$fields = function (SelectQuery $query) use ($driverName) {
-			$runtime = $query->newExpr('UNIX_TIMESTAMP(completed) - UNIX_TIMESTAMP(fetched)');
+			$runtime = $query->expr('UNIX_TIMESTAMP(completed) - UNIX_TIMESTAMP(fetched)');
 			switch ($driverName) {
 				case static::DRIVER_SQLSERVER:
-					$runtime = $query->newExpr("DATEDIFF(s, '1970-01-01 00:00:00', completed) - DATEDIFF(s, '1970-01-01 00:00:00', fetched)");
+					$runtime = $query->expr("DATEDIFF(s, '1970-01-01 00:00:00', completed) - DATEDIFF(s, '1970-01-01 00:00:00', fetched)");
 
 					break;
 				case static::DRIVER_POSTGRES:
-					$runtime = $query->newExpr('EXTRACT(EPOCH FROM completed) - EXTRACT(EPOCH FROM fetched)');
+					$runtime = $query->expr('EXTRACT(EPOCH FROM completed) - EXTRACT(EPOCH FROM fetched)');
 
 					break;
 				case static::DRIVER_SQLITE:
-					$runtime = $query->newExpr('julianday(completed) - julianday(fetched)');
+					$runtime = $query->expr('julianday(completed) - julianday(fetched)');
 
 					break;
 			}
@@ -547,37 +511,18 @@ class QueuedJobsTable extends Table {
 		$driverName = $this->getDriverName();
 
 		$query = $this->find();
-		$age = $query->newExpr()->add('IFNULL(TIMESTAMPDIFF(SECOND, "' . $nowStr . '", notbefore), 0)');
-		switch ($driverName) {
-			case static::DRIVER_SQLSERVER:
-				$age = $query->newExpr()->add('ISNULL(DATEDIFF(SECOND, GETDATE(), notbefore), 0)');
-
-				break;
-			case static::DRIVER_POSTGRES:
-				$age = $query->newExpr()
-					->add('COALESCE(EXTRACT(EPOCH FROM notbefore) - (EXTRACT(EPOCH FROM now())), 0)');
-
-				break;
-			case static::DRIVER_SQLITE:
-				$age = $query->newExpr()
-					->add('IFNULL(CAST(strftime("%s", CURRENT_TIMESTAMP) as integer) - CAST(strftime("%s", "' . $nowStr . '") as integer), 0)');
-
-				break;
-		}
 		$options = [
 			'conditions' => [
 				'completed IS' => null,
 				'OR' => [],
-			],
-			'fields' => [
-				'age' => $age,
-			],
-			'order' => [
-				'priority' => 'ASC',
-				'age' => 'ASC',
-				'id' => 'ASC',
-			],
+			]
 		];
+
+		if (!empty($groups)) {
+			$tasks = (new Collection($tasks))->filter(function ($task) use ($groups) {
+				return empty($task['group']) || in_array($task['group'], $groups);
+			})->toArray();
+		}
 
 		$costConstraints = [];
 		foreach ($tasks as $name => $task) {
@@ -663,10 +608,7 @@ class QueuedJobsTable extends Table {
 				'job_task' => $name,
 				'AND' => [
 					[
-						'OR' => [
-							'notbefore <' => $nowStr,
-							'notbefore IS' => null,
-						],
+						'notbefore <' => $nowStr,
 					],
 					[
 						'OR' => [
@@ -692,7 +634,7 @@ class QueuedJobsTable extends Table {
 
 						break;
 					case static::DRIVER_SQLITE:
-						//TODO
+						$tmp['strftime("%s", "now") >='] = $this->rateHistory[$tmp['job_task']] + $task['rate'];
 
 						break;
 				}
@@ -700,21 +642,25 @@ class QueuedJobsTable extends Table {
 			$options['conditions']['OR'][] = $tmp;
 		}
 
-		$job = $this->requestUniqueJob($this->find('all', ...$options), $now);
-
 		/** @var \Queue\Model\Entity\QueuedJob|null $job */
-		/*$job = $this->getConnection()->transactional(function () use ($query, $options, $now, $driverName) {
-			$query->find('all', ...$options)->enableAutoFields(true);
+		$job = $this->getConnection()->transactional(function () use ($query, $options, $now, $driverName) {
+			$query->find('all', ...$options)->enableAutoFields(true)
+				->orderBy(['priority' => 'ASC', 'notbefore' => 'ASC', 'id' => 'ASC']);
 
 			switch ($driverName) {
 				case static::DRIVER_MYSQL:
+					$query->epilog('FOR UPDATE SKIP LOCKED');
+
+					break;
 				case static::DRIVER_POSTGRES:
 					$query->epilog('FOR UPDATE');
 
 					break;
 				case static::DRIVER_SQLSERVER:
-					// the ORM does not support ROW locking at the moment
-					// TODO
+					// Row-level locking (ROWLOCK, UPDLOCK hints) not supported by CakePHP ORM.
+					// SQLServer uses default isolation level (READ COMMITTED) with automatic
+					// row locking on UPDATE. This may allow race conditions in high-concurrency
+					// scenarios. Consider using application-level locking or advisory locks if needed.
 
 					break;
 				case static::DRIVER_SQLITE:
@@ -724,7 +670,7 @@ class QueuedJobsTable extends Table {
 			}
 
 			/** @var \Queue\Model\Entity\QueuedJob|null $job */
-			/*$job = $query->first();
+			$job = $query->first();
 
 			if (!$job) {
 				return null;
@@ -736,11 +682,12 @@ class QueuedJobsTable extends Table {
 				'fetched' => $now,
 				'progress' => null,
 				'failure_message' => null,
+				'output' => null,
 				'attempts' => $job->attempts + 1,
 			]);
 
 			return $this->saveOrFail($job);
-		});*/
+		});
 
 		if (!$job) {
 			return null;
@@ -750,62 +697,6 @@ class QueuedJobsTable extends Table {
 
 		return $job;
 	}
-
-	/**
-	 * Get the Job by filering on a unique constraind
-	 * @param SelectQuery $query
-	 * @return QueuedJob|null
-	 */
-	public function requestUniqueJob(SelectQuery $query, $now): ?QueuedJob
-	{
-		$key = $this->key();
-
-		$sql = $query->sql();
-
-		$wherePart = substr($sql, strpos($sql, 'WHERE'));
-		$start = strpos($sql, '(');
-		$agePart = substr($sql, $start, strpos($sql, ' AS age') - $start);
-
-		$wherePart = str_replace("age", $agePart, $wherePart);
-
-		$query->getValueBinder()->bind(':wk', $key, 'string');
-		$query->getValueBinder()->bind(':ft', $now->toDateTimeString(), 'datetime');
-
-		$data = [
-			'workerkey = :wk',
-			'fetched = :ft',
-			'progress = null',
-			'failure_message = null',
-			'attempts = attempts + 1',
-		];
-
-		$updateSql = "UPDATE ".$this->getTable(). " SET ".implode(', ', $data)." $wherePart LIMIT 1";
-
-		$params = [];
-		$types = [];
-		foreach ($query->getValueBinder()->bindings() as $binding) {
-			if ($binding['value'] instanceof DateTime) {
-				$binding['value'] = $binding['value']->toDateTimeString();
-				$binding['type'] = 'string';
-			}
-			$params[$binding['placeholder']] = $binding['value'];
-			$types[] = $binding['type'];
-		}
-
-		if ($this->getConnection()->execute($updateSql, $params, $types)->rowCount() == 0) {
-			return null;
-		}
-
-		// add extra sleep fordecreasing possibility of running jobs at same time.
-		$sec = rand(intval(5e5),intval(15e5));
-		usleep($sec);
-
-		return $this->find()->where([
-			'workerkey' => $key,
-			'fetched' => $now,
-		])->orderByDesc('fetched')->limit(1)->first();
-	}
-
 	/**
 	 * @param int $id ID of job
 	 * @param float $progress Value from 0 to 1
@@ -820,6 +711,7 @@ class QueuedJobsTable extends Table {
 
 		$values = [
 			'progress' => round($progress, 2),
+			'memory' => Memory::usage(),
 		];
 		if ($status !== null) {
 			$values['status'] = $status;
@@ -832,15 +724,20 @@ class QueuedJobsTable extends Table {
 	 * Mark a job as Completed, removing it from the queue.
 	 *
 	 * @param \Queue\Model\Entity\QueuedJob $job Job
+	 * @param string|null $output Optional captured output.
 	 *
 	 * @return bool Success
 	 */
-	public function markJobDone(QueuedJob $job): bool {
+	public function markJobDone(QueuedJob $job, ?string $output = null): bool {
 		$fields = [
 			'progress' => 1,
 			'failed' => NULL,
 			'completed' => $this->getDateTime(),
+			'memory' => Memory::usage(),
 		];
+		if ($output !== null) {
+			$fields['output'] = $output;
+		}
 		$job = $this->patchEntity($job, $fields);
 
 		return (bool)$this->save($job);
@@ -851,14 +748,18 @@ class QueuedJobsTable extends Table {
 	 *
 	 * @param \Queue\Model\Entity\QueuedJob $job Job
 	 * @param string|null $failureMessage Optional message to append to the failure_message field.
+	 * @param string|null $output Optional captured output.
 	 *
 	 * @return bool Success
 	 */
-	public function markJobFailed(QueuedJob $job, ?string $failureMessage = null): bool {
+	public function markJobFailed(QueuedJob $job, ?string $failureMessage = null, ?string $output = null): bool {
 		$fields = [
 			'failure_message' => $failureMessage,
-			'failed' => $this->getDateTime(),
+			'memory' => Memory::usage(),
 		];
+		if ($output !== null) {
+			$fields['output'] = $output;
+		}
 		$job = $this->patchEntity($job, $fields);
 
 		return (bool)$this->save($job);
@@ -920,6 +821,8 @@ class QueuedJobsTable extends Table {
 			'attempts' => 0,
 			'workerkey' => null,
 			'failure_message' => null,
+			'output' => null,
+			'memory' => null,
 		];
 		$conditions = [
 			'completed IS' => null,
@@ -952,6 +855,8 @@ class QueuedJobsTable extends Table {
 			'attempts' => 0,
 			'workerkey' => null,
 			'failure_message' => null,
+			'output' => null,
+			'memory' => null,
 		];
 		$conditions = [
 			'completed IS NOT' => null,
@@ -977,6 +882,8 @@ class QueuedJobsTable extends Table {
 			'attempts' => 0,
 			'workerkey' => null,
 			'failure_message' => null,
+			'output' => null,
+			'memory' => null,
 		];
 		$conditions = [
 			'completed IS NOT' => null,
@@ -984,6 +891,29 @@ class QueuedJobsTable extends Table {
 		];
 
 		return $this->updateAll($fields, $conditions);
+	}
+
+	/**
+	 * @param \Queue\Model\Entity\QueuedJob $queuedJob
+	 *
+	 * @return \Queue\Model\Entity\QueuedJob|null
+	 */
+	public function clone(QueuedJob $queuedJob): ?QueuedJob {
+		$defaults = [
+			'completed' => null,
+			'fetched' => null,
+			'progress' => null,
+			'attempts' => 0,
+			'workerkey' => null,
+			'failure_message' => null,
+			'output' => null,
+			'memory' => null,
+		];
+		$data = $defaults + $queuedJob->toArray();
+		$data['created'] = new DateTime();
+		$queuedJob = $this->newEntity($data);
+
+		return $this->save($queuedJob) ?: null;
 	}
 
 	/**
@@ -1005,6 +935,7 @@ class QueuedJobsTable extends Table {
 				'notbefore',
 				'attempts',
 				'failure_message',
+				'memory',
 			],
 			'conditions' => [
 				'completed IS' => null,
@@ -1035,6 +966,7 @@ class QueuedJobsTable extends Table {
 				'notbefore',
 				'attempts',
 				'failure_message',
+				'memory',
 			],
 			'conditions' => [
 				'completed IS' => null,
@@ -1051,12 +983,15 @@ class QueuedJobsTable extends Table {
 	 * @return int
 	 */
 	public function cleanOldJobs(): int {
-		if (!Configure::read('Queue.cleanuptimeout')) {
+		$cleanupTimeout = Config::cleanuptimeout();
+		if (!$cleanupTimeout) {
 			return 0;
 		}
 
+		$threshold = (new DateTime())->subSeconds($cleanupTimeout);
+
 		return $this->deleteAll([
-			'completed <' => time() - (int)Configure::read('Queue.cleanuptimeout'),
+			'completed <' => $threshold,
 		]);
 	}
 
@@ -1084,10 +1019,15 @@ class QueuedJobsTable extends Table {
 	public function getFailedStatus(QueuedJob $queuedTask, array $taskConfiguration): string {
 		$failureMessageRequeued = 'requeued';
 
-		$queuedTaskName = 'Queue' . $queuedTask->job_task;
+		$queuedTaskName = $queuedTask->job_task;
 		if (empty($taskConfiguration[$queuedTaskName])) {
-			return $failureMessageRequeued;
+			// Try with plugin prefix for backward compatibility (e.g. "Example" => "Queue.Example")
+			$queuedTaskName = 'Queue.' . $queuedTask->job_task;
+			if (empty($taskConfiguration[$queuedTaskName])) {
+				return $failureMessageRequeued;
+			}
 		}
+
 		$retries = $taskConfiguration[$queuedTaskName]['retries'];
 		if ($queuedTask->attempts <= $retries) {
 			return $failureMessageRequeued;
@@ -1109,29 +1049,6 @@ class QueuedJobsTable extends Table {
 	}
 
 	/**
-	 * //FIXME
-	 *
-	 * @return void
-	 */
-	public function clearDoublettes(): void {
-		/** @var array<int> $x */
-		$x = $this->getConnection()->selectQuery('SELECT max(id) as id FROM `' . $this->getTable() . '`
-	WHERE completed is NULL
-	GROUP BY data
-	HAVING COUNT(id) > 1');
-
-		$start = 0;
-		$x = array_keys($x);
-		$numX = count($x);
-		while ($start <= $numX) {
-			$this->deleteAll([
-				'id' => array_slice($x, $start, 10),
-			]);
-			$start = $start + 100;
-		}
-	}
-
-	/**
 	 * Generates a unique Identifier for the current worker thread.
 	 *
 	 * Useful to identify the currently running processes for this thread.
@@ -1142,10 +1059,7 @@ class QueuedJobsTable extends Table {
 		if ($this->_key !== null) {
 			return $this->_key;
 		}
-		$this->_key = sha1(microtime() . mt_rand(100, 999));
-		if (!$this->_key) {
-			throw new RuntimeException('Invalid key generated');
-		}
+		$this->_key = bin2hex(random_bytes(20));
 
 		return $this->_key;
 	}

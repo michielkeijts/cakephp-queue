@@ -6,10 +6,11 @@ namespace Queue\Controller\Admin;
 use App\Controller\AppController;
 use Cake\Core\Configure;
 use Exception;
+use const SIGTERM;
 
 /**
  * @property \Queue\Model\Table\QueueProcessesTable $QueueProcesses
- * @method \Cake\Datasource\ResultSetInterface<\Queue\Model\Entity\QueueProcess> paginate($object = null, array $settings = [])
+ * @method \Cake\Datasource\ResultSetInterface<\Queue\Model\Entity\QueueProcess> paginate(\Cake\Datasource\RepositoryInterface|\Cake\Datasource\QueryInterface|string|null $object = null, array $settings = [])
  * @property \Queue\Model\Table\QueuedJobsTable $QueuedJobs
  */
 class QueueProcessesController extends AppController {

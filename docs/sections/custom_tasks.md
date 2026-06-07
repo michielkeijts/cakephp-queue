@@ -26,14 +26,19 @@ use Queue\Queue\Task;
 class YourNameForItTask extends Task {
 
     /**
-     * @var int
+     * Timeout in seconds for this specific task.
+     * Automatically capped to defaultRequeueTimeout if higher.
+     *
+     * @var ?int
      */
-    public $timeout = 20;
+    public ?int $timeout = 20;
 
     /**
-     * @var int
+     * Number of retries for this task if it fails.
+     *
+     * @var ?int
      */
-    public $retries = 1;
+    public ?int $retries = 1;
 
     /**
      * @param array $data The array passed to QueuedJobsTable::createJob()
